@@ -1,0 +1,11 @@
+BreakBeforeBraces: Linux
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+InsertNewlineAtEOF: true
+KeepEmptyLinesAtEOF: true
+AlignConsecutiveBitFields: true
+BinPackArguments: false
+BinPackParameters: false
+BinPackLongBracedList: false
+AllowAllArgumentsOnNextLine: false

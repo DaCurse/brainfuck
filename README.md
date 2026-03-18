@@ -1,0 +1,214 @@
+# Brainfuck
+
+```
+Program tree:
+BF_CHANGE_DATA: -1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +33
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +3
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +5
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +22
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +7
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +3
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +7
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +3
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +3
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +3
+BF_CHANGE_DATA: +2
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +3
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +3
+BF_CHANGE_PTR: +2
+BF_CHANGE_DATA: +1
+BF_LOOP:
+    BF_LOOP:
+        BF_CHANGE_PTR: +2
+        BF_CHANGE_DATA: +1
+        BF_LOOP:
+            BF_CHANGE_PTR: +1
+        BF_CHANGE_DATA: +1
+        BF_CHANGE_PTR: +1
+        BF_CHANGE_DATA: +1
+        BF_LOOP:
+            BF_CHANGE_PTR: -1
+        BF_CHANGE_PTR: -1
+        BF_CHANGE_DATA: -1
+    BF_CHANGE_PTR: +2
+    BF_LOOP:
+        BF_CHANGE_PTR: +1
+    BF_CHANGE_PTR: -1
+    BF_CHANGE_DATA: +1
+    BF_CHANGE_PTR: -1
+    BF_CHANGE_DATA: +3
+    BF_LOOP:
+        BF_CHANGE_PTR: -1
+    BF_CHANGE_PTR: -2
+    BF_CHANGE_DATA: +1
+BF_CHANGE_PTR: +3
+BF_LOOP:
+    BF_CHANGE_PTR: +1
+BF_CHANGE_DATA: +3
+BF_LOOP:
+    BF_CHANGE_DATA: +10
+    BF_CHANGE_PTR: +1
+    BF_CHANGE_DATA: +2
+    BF_LOOP:
+        BF_CHANGE_DATA: -1
+        BF_CHANGE_PTR: -1
+        BF_CHANGE_DATA: +16
+        BF_CHANGE_PTR: +1
+    BF_CHANGE_PTR: -1
+    BF_OUTPUT: 1
+    BF_CHANGE_PTR: -1
+    BF_CHANGE_DATA: -1
+    BF_CHANGE_PTR: -1
+
+Program reconstructed from tree:
+->++>+++>+>+>++>>+>+>+++>>+>+>++>+++>+++>+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>+>+>++>>>+++>>>>>+++>+>>>>>>>>>>>>>>>>>>>>>>+++>>>>>>>++>+++>+++>+>>+++>+++>+>+++>+>+++>+>++>+++>>>+>+>+>+>++>+++>+>+>>+++>>>>>>>+>+>>>+>+>++>+++>+++>+>>+++>+++>+>+++>+>++>+++>++>>+>+>++>+++>+>+>>+++>>>+++>+>>>++>+++>+++>+>>+++>>>+++>+>+++>+>>+++>>+++>>+[[>>+[>]+>+[<]<-]>>[>]<+<+++[<]<<+]>>>[>]+++[++++++++++>++[-<++++++++++++++++>]<.<-<]
+
+Output:
+->++>+++>+>+>++>>+>+>+++>>+>+>++>+++>+++>+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>+>+>++>>>+++>>>>>+++>+>>>>>>>>>>>>>>>>>>>>>>+++>>>>>>>++>+++>+++>+>>+++>+++>+>+++>+>+++>+>++>+++>>>+>+>+>+>++>+++>+>+>>+++>>>>>>>+>+>>>+>+>++>+++>+++>+>>+++>+++>+>+++>+>++>+++>++>>+>+>++>+++>+>+>>+++>>>+++>+>>>++>+++>+++>+>>+++>>>+++>+>+++>+>>+++>>+++>>+[[>>+[>]+>+[<]<-]>>[>]<+<+++[<]<<+]>>>[>]+++[++++++++++>++[-<++++++++++++++++>]<.<-<]
+```

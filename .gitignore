@@ -1,0 +1,5 @@
+bf
+*.exe
+*.o
+.vscode/
+*.swp
