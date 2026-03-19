@@ -155,6 +155,9 @@ void mason_arena_destroy(MASON_Arena *arena)
 }
 
 // New
+// Only resizes in place if `ptr` is the last allocation.
+// Otherwise allocates new memory and copies. `old_size` must be correct.
+// Memory is not freed except for the last allocation.
 void *mason_arena_realloc(MASON_Arena *arena,
                           void *ptr,
                           size_t old_size,
@@ -169,14 +172,19 @@ void *mason_arena_realloc(MASON_Arena *arena,
     size_t old_aligned = align_up_pow2(old_size, _MASON_ARENA_ALIGN);
     size_t new_aligned = align_up_pow2(new_size, _MASON_ARENA_ALIGN);
     MASON_ArenaBlock *current = arena->current;
-    unsigned char *expected_ptr = current->data + current->offset - old_aligned;
+    uint8_t *expected_ptr = current->data + current->offset - old_aligned;
 
-    if ((unsigned char *)ptr == expected_ptr) {
+    if ((uint8_t *)ptr == expected_ptr) {
         size_t base_offset = current->offset - old_aligned;
 
-        if (base_offset + new_aligned <= current->capacity) {
+        if (new_size == 0) {
+            current->offset = base_offset;
+            return NULL;
+        }
+
+        if (new_aligned <= current->capacity - base_offset) {
             current->offset = base_offset + new_aligned;
-            return new_size == 0 ? NULL : ptr;
+            return ptr;
         }
     }
 

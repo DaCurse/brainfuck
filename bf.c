@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <ctype.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,9 +16,12 @@
 #define da_append_many(da, src, n)                                             \
     do {                                                                       \
         size_t item_size = sizeof(*(da)->items);                               \
-        while ((da)->count + (n) > (da)->capacity) {                           \
+        if ((da)->count + (n) > (da)->capacity) {                              \
             size_t new_capacity = (da)->capacity == 0 ? DA_INITIAL_CAPACITY    \
                                                       : (da)->capacity * 2;    \
+            while (new_capacity < (da)->count + (n)) {                         \
+                new_capacity *= 2;                                             \
+            }                                                                  \
             (da)->items = mason_arena_realloc(arena,                           \
                                               (da)->items,                     \
                                               (da)->capacity * item_size,      \
@@ -93,7 +97,7 @@ typedef struct {
 typedef uint8_t Cell;
 #else
 typedef uint16_t Cell;
-#endif 
+#endif
 
 typedef struct {
     Cell *tape;
@@ -297,43 +301,48 @@ char lexer_next_char(Lexer *l)
 
 bool lexer_next(Lexer *l)
 {
-    while (isspace(lexer_current_char(l))) {
-        lexer_next_char(l);
-    }
+    while (true) {
+        while (isspace(lexer_current_char(l))) {
+            lexer_next_char(l);
+        }
 
-    char c = lexer_next_char(l);
-    if (c == '\0') {
-        l->token = TOKEN_END;
-        return false;
-    }
+        char c = lexer_next_char(l);
 
-    switch (c) {
-    case '>':
-        l->token = TOKEN_RARROW;
-        return true;
-    case '<':
-        l->token = TOKEN_LARROW;
-        return true;
-    case '+':
-        l->token = TOKEN_PLUS;
-        return true;
-    case '-':
-        l->token = TOKEN_MINUS;
-        return true;
-    case '.':
-        l->token = TOKEN_DOT;
-        return true;
-    case ',':
-        l->token = TOKEN_COMMA;
-        return true;
-    case '[':
-        l->token = TOKEN_OBRACKET;
-        return true;
-    case ']':
-        l->token = TOKEN_CBRACKET;
-        return true;
-    default: // Ignore unknown chars
-        return lexer_next(l);
+        if (c == '\0') {
+            l->token = TOKEN_END;
+            return false;
+        }
+
+        switch (c) {
+        case '>':
+            l->token = TOKEN_RARROW;
+            return true;
+        case '<':
+            l->token = TOKEN_LARROW;
+            return true;
+        case '+':
+            l->token = TOKEN_PLUS;
+            return true;
+        case '-':
+            l->token = TOKEN_MINUS;
+            return true;
+        case '.':
+            l->token = TOKEN_DOT;
+            return true;
+        case ',':
+            l->token = TOKEN_COMMA;
+            return true;
+        case '[':
+            l->token = TOKEN_OBRACKET;
+            return true;
+        case ']':
+            l->token = TOKEN_CBRACKET;
+            return true;
+
+        default:
+            // Ignore unknown chars
+            break;
+        }
     }
 }
 
@@ -343,8 +352,10 @@ size_t lexer_forward_count(Lexer *l, TokenKind expected)
 
     while (true) {
         Cursor saved = l->cur;
+        TokenKind tok = l->token;
         if (!lexer_next(l) || l->token != expected) {
             l->cur = saved;
+            l->token = tok;
             break;
         }
         count++;
@@ -478,8 +489,8 @@ int main(int argc, char **argv)
 
     Buffer buf = {0};
     char chunk[4096];
-    while (!feof(f)) {
-        size_t read = fread(chunk, 1, sizeof(chunk), f);
+    size_t read;
+    while ((read = fread(chunk, 1, sizeof(chunk), f)) > 0) {
         da_append_many(&buf, chunk, read);
     }
     if (buf.count == 0) {
