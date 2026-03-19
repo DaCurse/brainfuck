@@ -5,18 +5,20 @@ Brainfuck interpreter in C.
 ## Build
 
 ```bash
-# debug build
-make          
-# trace build (prints ast)
-make bf_trace  -> ./bf_trace
-# optimized build
-make bf_opt   
+# default build
+make
+# enable trace output
+make TRACE=1
+# enable big-number mode (16 bit cells)
+make BIGNUM=1
+# compile with -O3
+make bf_opt
 ```
 
 ## Run
 
 ```bash
 ./bf examples/helloworld.b
-./bf_trace examples/rot13.b
+./bf examples/rot13.b
 ./bf_opt examples/bitwidth.b
 ```

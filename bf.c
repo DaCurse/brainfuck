@@ -89,8 +89,14 @@ typedef struct {
     TokenKind token;
 } Lexer;
 
+#ifndef BRAINFUCK_BIGNUM
+typedef uint8_t Cell;
+#else
+typedef uint16_t Cell;
+#endif 
+
 typedef struct {
-    uint8_t *tape;
+    Cell *tape;
     size_t tape_size;
     ptrdiff_t data_ptr;
 } Brainfuck;
@@ -434,7 +440,7 @@ void run_program(Brainfuck *bf, Program program)
             break;
         case BF_INPUT:
             int c = getchar();
-            bf->tape[bf->data_ptr] = (c == EOF) ? 0 : (uint8_t)c;
+            bf->tape[bf->data_ptr] = (c == EOF) ? 0 : (Cell)c;
             break;
         case BF_LOOP:
             while (bf->tape[bf->data_ptr] != 0) {
