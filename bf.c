@@ -441,8 +441,9 @@ void run_program(Brainfuck *bf, Program program)
         switch (inst->kind) {
         case BF_CHANGE_PTR:
             bf->data_ptr += inst->as.ptr_diff;
+            ptrdiff_t tape_size = (ptrdiff_t)bf->tape_size;
             bf->data_ptr =
-                (bf->data_ptr % bf->tape_size + bf->tape_size) % bf->tape_size;
+                (bf->data_ptr % tape_size + tape_size) % tape_size;
             break;
         case BF_CHANGE_DATA:
             bf->tape[bf->data_ptr] += inst->as.data_diff;
@@ -513,6 +514,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "ERROR: Invalid program\n");
         mason_arena_destroy(arena);
         return 1;
+    }
+
+    if(p.count == 0) {
+        fprintf(stderr, "NOTE: Empty program\n");
     }
 
 #ifdef TRACE_PROGRAM
