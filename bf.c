@@ -40,7 +40,7 @@
     clock_gettime(CLOCK_MONOTONIC, &_timer_##name)
 #define PROFILE_END(name)                                                      \
     fprintf(stderr,                                                            \
-            "PROFILE: " #name " took %.3fms\n",                                \
+            "\nPROFILE: " #name " took %.3fms\n",                              \
             timer_elapsed(&_timer_##name))
 #else
 #define PROFILE_START(_name) (void)0
@@ -263,10 +263,17 @@ void display_instruction(Instruction *inst)
     }
 }
 
+void display_program(Program p)
+{
+    for (size_t i = 0; i < p.count; i++) {
+        display_instruction(p.items[i]);
+    }
+}
+
 void display_instruction_tree(Instruction *inst, size_t depth)
 {
     for (size_t i = 0; i < depth; i++) {
-        printf("\t");
+        printf("    ");
     }
 
     switch (inst->kind) {
@@ -296,7 +303,7 @@ void display_instruction_tree(Instruction *inst, size_t depth)
 void display_program_tree(Program p)
 {
     for (size_t i = 0; i < p.count; i++) {
-        display_instruction_tree(p.items[i], 0);
+        display_instruction_tree(p.items[i], 1);
     }
 }
 
@@ -506,7 +513,7 @@ int main(int argc, char **argv)
 {
     char *program = argv[0];
     if (--argc < 1) {
-        fprintf(stderr, "USAGE: %s <filename>", program);
+        fprintf(stderr, "USAGE: %s <filename>\n", program);
         return 1;
     }
 
