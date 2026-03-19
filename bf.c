@@ -16,7 +16,7 @@
 #define da_append_many(da, src, n)                                             \
     do {                                                                       \
         size_t item_size = sizeof(*(da)->items);                               \
-        if ((da)->count + (n) > (da)->capacity) {                              \
+        if ((da)->capacity - (da)->count < (n)) {                              \
             size_t new_capacity = (da)->capacity == 0 ? DA_INITIAL_CAPACITY    \
                                                       : (da)->capacity * 2;    \
             while (new_capacity < (da)->count + (n)) {                         \
@@ -203,14 +203,17 @@ void display_instruction(Instruction *inst)
     switch (inst->kind) {
     case BF_CHANGE_PTR: {
         char inst_repr = inst->as.ptr_diff > 0 ? '>' : '<';
-        ptrdiff_t abs_diff = inst->as.ptr_diff < 0 ? -inst->as.ptr_diff : inst->as.ptr_diff;
-        for (size_t i = 0; i < (size_t)abs_diff; i++) {
+        ptrdiff_t abs_diff =
+            inst->as.ptr_diff < 0 ? -inst->as.ptr_diff : inst->as.ptr_diff;
+        for (ptrdiff_t i = 0; i < abs_diff; i++) {
             putchar(inst_repr);
         }
     } break;
     case BF_CHANGE_DATA: {
         char inst_repr = inst->as.data_diff > 0 ? '+' : '-';
-        for (size_t i = 0; i < abs(inst->as.data_diff); i++) {
+        int32_t abs_diff =
+            inst->as.data_diff < 0 ? -inst->as.data_diff : inst->as.data_diff;
+        for (int32_t i = 0; i < abs_diff; i++) {
             putchar(inst_repr);
         }
     } break;
@@ -340,15 +343,19 @@ bool lexer_next(Lexer *l)
     }
 }
 
-bool lexer_peek(Lexer *l, TokenKind *out) {
+bool lexer_peek(Lexer *l, TokenKind *out)
+{
     Lexer saved = *l;
     bool ok = lexer_next(l);
-    if (ok) *out = l->token;
+    if (ok) {
+        *out = l->token;
+    }
     *l = saved;
     return ok;
 }
 
-size_t lexer_forward_count(Lexer *l, TokenKind expected) {
+size_t lexer_forward_count(Lexer *l, TokenKind expected)
+{
     size_t count = 0;
     TokenKind peeked;
     while (lexer_peek(l, &peeked) && peeked == expected) {
@@ -358,8 +365,8 @@ size_t lexer_forward_count(Lexer *l, TokenKind expected) {
     return count;
 }
 
-Program invalid_program() { return (Program){ .valid = false }; }
-Program empty_program()   { return (Program){ .valid = true  }; }
+Program invalid_program() { return (Program){.valid = false}; }
+Program empty_program() { return (Program){.valid = true}; }
 
 Program parse_program(Lexer *l, TokenKind stop_token)
 {
@@ -442,8 +449,7 @@ void run_program(Brainfuck *bf, Program program)
         case BF_CHANGE_PTR:
             bf->data_ptr += inst->as.ptr_diff;
             ptrdiff_t tape_size = (ptrdiff_t)bf->tape_size;
-            bf->data_ptr =
-                (bf->data_ptr % tape_size + tape_size) % tape_size;
+            bf->data_ptr = (bf->data_ptr % tape_size + tape_size) % tape_size;
             break;
         case BF_CHANGE_DATA:
             bf->tape[bf->data_ptr] += inst->as.data_diff;
@@ -516,7 +522,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if(p.count == 0) {
+    if (p.count == 0) {
         fprintf(stderr, "NOTE: Empty program\n");
     }
 
