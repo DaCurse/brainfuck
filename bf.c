@@ -58,6 +58,7 @@ typedef enum {
 typedef struct Instruction Instruction;
 
 typedef struct {
+    bool valid;
     Instruction **items;
     size_t count;
     size_t capacity;
@@ -67,7 +68,7 @@ struct Instruction {
     InstructionKind kind;
     union {
         ptrdiff_t ptr_diff;
-        int8_t data_diff;
+        int32_t data_diff;
         size_t output_count;
         Program loop;
     } as;
@@ -113,7 +114,7 @@ Instruction *change_ptr(ptrdiff_t diff)
     return inst;
 }
 
-Instruction *change_data(int8_t diff)
+Instruction *change_data(int32_t diff)
 {
     Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
     inst->kind = BF_CHANGE_DATA;
@@ -199,11 +200,11 @@ void display_token(TokenKind kind)
 
 void display_instruction(Instruction *inst)
 {
-
     switch (inst->kind) {
     case BF_CHANGE_PTR: {
         char inst_repr = inst->as.ptr_diff > 0 ? '>' : '<';
-        for (size_t i = 0; i < llabs(inst->as.ptr_diff); i++) {
+        ptrdiff_t abs_diff = inst->as.ptr_diff < 0 ? -inst->as.ptr_diff : inst->as.ptr_diff;
+        for (size_t i = 0; i < (size_t)abs_diff; i++) {
             putchar(inst_repr);
         }
     } break;
@@ -233,13 +234,6 @@ void display_instruction(Instruction *inst)
     }
 }
 
-void display_program(Program p)
-{
-    for (size_t i = 0; i < p.count; i++) {
-        display_instruction(p.items[i]);
-    }
-}
-
 void display_instruction_tree(Instruction *inst, size_t depth)
 {
     for (size_t i = 0; i < depth; i++) {
@@ -248,7 +242,7 @@ void display_instruction_tree(Instruction *inst, size_t depth)
 
     switch (inst->kind) {
     case BF_CHANGE_PTR:
-        printf("BF_CHANGE_PTR: %+lld\n", inst->as.ptr_diff);
+        printf("BF_CHANGE_PTR: %+td\n", inst->as.ptr_diff);
         break;
     case BF_CHANGE_DATA:
         printf("BF_CHANGE_DATA: %+d\n", inst->as.data_diff);
@@ -346,33 +340,35 @@ bool lexer_next(Lexer *l)
     }
 }
 
-size_t lexer_forward_count(Lexer *l, TokenKind expected)
-{
-    size_t count = 0;
+bool lexer_peek(Lexer *l, TokenKind *out) {
+    Lexer saved = *l;
+    bool ok = lexer_next(l);
+    if (ok) *out = l->token;
+    *l = saved;
+    return ok;
+}
 
-    while (true) {
-        Cursor saved = l->cur;
-        TokenKind tok = l->token;
-        if (!lexer_next(l) || l->token != expected) {
-            l->cur = saved;
-            l->token = tok;
-            break;
-        }
+size_t lexer_forward_count(Lexer *l, TokenKind expected) {
+    size_t count = 0;
+    TokenKind peeked;
+    while (lexer_peek(l, &peeked) && peeked == expected) {
+        lexer_next(l);
         count++;
     }
-
     return count;
 }
 
-Program invalid_program() { return (Program){NULL, 0, 0}; }
+Program invalid_program() { return (Program){ .valid = false }; }
+Program empty_program()   { return (Program){ .valid = true  }; }
 
 Program parse_program(Lexer *l, TokenKind stop_token)
 {
-    Program p = {0};
+    Program p = empty_program();
 
     while (true) {
         if (!lexer_next(l)) {
-            return (stop_token == TOKEN_END ? p : invalid_program());
+            p.valid = stop_token == TOKEN_END;
+            return p;
         }
 
         if (l->token == stop_token) {
@@ -414,6 +410,13 @@ Program parse_program(Lexer *l, TokenKind stop_token)
             }
             inst = loop_from_program(body);
             break;
+
+        case TOKEN_CBRACKET:
+            fprintf(stderr,
+                    "ERROR: Unmatched ']' at line %zu, column %zu\n",
+                    l->cur.row + 1,
+                    l->cur.pos - l->cur.bol);
+            return invalid_program();
 
         default:
             fprintf(stderr,
@@ -493,6 +496,8 @@ int main(int argc, char **argv)
     while ((read = fread(chunk, 1, sizeof(chunk), f)) > 0) {
         da_append_many(&buf, chunk, read);
     }
+    fclose(f);
+
     if (buf.count == 0) {
         fprintf(stderr, "ERROR: Empty input file\n");
         mason_arena_destroy(arena);
@@ -504,7 +509,7 @@ int main(int argc, char **argv)
         .count = buf.count,
     };
     Program p = parse_program(&l, TOKEN_END);
-    if (p.items == NULL) {
+    if (!p.valid) {
         fprintf(stderr, "ERROR: Invalid program\n");
         mason_arena_destroy(arena);
         return 1;
