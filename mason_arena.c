@@ -6,12 +6,14 @@
 
 #define _MASON_ARENA_ALIGN (_Alignof(max_align_t))
 
-static inline size_t align_up_pow2(size_t value, size_t align) {
+static inline size_t align_up_pow2(size_t value, size_t align)
+{
     assert(align != 0 && (align & (align - 1)) == 0);
     return (value + align - 1) & ~(align - 1);
 }
 
-MASON_Arena *mason_arena_create(size_t initial_capacity) {
+MASON_Arena *mason_arena_create(size_t initial_capacity)
+{
     assert(initial_capacity != 0);
     if (initial_capacity == 0) {
         return NULL;
@@ -39,7 +41,8 @@ MASON_Arena *mason_arena_create(size_t initial_capacity) {
     return arena;
 }
 
-void *mason_arena_alloc(MASON_Arena *arena, size_t size) {
+void *mason_arena_alloc(MASON_Arena *arena, size_t size)
+{
     size = align_up_pow2(size, _Alignof(max_align_t));
 
     MASON_ArenaBlock *current = arena->current;
@@ -70,7 +73,8 @@ void *mason_arena_alloc(MASON_Arena *arena, size_t size) {
     return new_block->data;
 }
 
-void *mason_arena_calloc(MASON_Arena *arena, size_t count, size_t size) {
+void *mason_arena_calloc(MASON_Arena *arena, size_t count, size_t size)
+{
     if (count == 0 || size == 0) {
         return NULL;
     }
@@ -88,18 +92,21 @@ void *mason_arena_calloc(MASON_Arena *arena, size_t count, size_t size) {
     return ptr;
 }
 
-MASON_ArenaMark mason_arena_mark(MASON_Arena *arena) {
+MASON_ArenaMark mason_arena_mark(MASON_Arena *arena)
+{
     assert(arena && arena->current);
     return (MASON_ArenaMark){arena->current, arena->current->offset};
 }
 
-MASON_ArenaStats mason_arena_stats(const MASON_Arena *arena) {
+MASON_ArenaStats mason_arena_stats(const MASON_Arena *arena)
+{
     MASON_ArenaStats stats = {0};
     if (!arena) {
         return stats;
     }
 
-    for (const MASON_ArenaBlock *block = arena->head; block; block = block->next) {
+    for (const MASON_ArenaBlock *block = arena->head; block;
+         block = block->next) {
         stats.block_count++;
         stats.total_capacity += block->capacity;
         stats.total_used += block->offset;
@@ -108,7 +115,8 @@ MASON_ArenaStats mason_arena_stats(const MASON_Arena *arena) {
     return stats;
 }
 
-void mason_arena_rewind(MASON_Arena *arena, MASON_ArenaMark mark) {
+void mason_arena_rewind(MASON_Arena *arena, MASON_ArenaMark mark)
+{
     assert(arena && arena->head);
     assert(mark.block);
     assert(mark.offset <= mark.block->capacity);
@@ -116,12 +124,14 @@ void mason_arena_rewind(MASON_Arena *arena, MASON_ArenaMark mark) {
     arena->current = mark.block;
     arena->current->offset = mark.offset;
 
-    for (MASON_ArenaBlock *block = mark.block->next; block; block = block->next) {
+    for (MASON_ArenaBlock *block = mark.block->next; block;
+         block = block->next) {
         block->offset = 0;
     }
 }
 
-void mason_arena_reset(MASON_Arena *arena) {
+void mason_arena_reset(MASON_Arena *arena)
+{
     assert(arena && arena->head);
 
     for (MASON_ArenaBlock *block = arena->head; block; block = block->next) {
@@ -131,7 +141,8 @@ void mason_arena_reset(MASON_Arena *arena) {
     arena->current = arena->head;
 }
 
-void mason_arena_destroy(MASON_Arena *arena) {
+void mason_arena_destroy(MASON_Arena *arena)
+{
     assert(arena && arena->head);
 
     for (MASON_ArenaBlock *block = arena->head; block;) {
@@ -141,4 +152,43 @@ void mason_arena_destroy(MASON_Arena *arena) {
     }
 
     free(arena);
+}
+
+// New
+void *mason_arena_realloc(MASON_Arena *arena,
+                          void *ptr,
+                          size_t old_size,
+                          size_t new_size)
+{
+    assert(arena && arena->current);
+
+    if (!ptr) {
+        return new_size == 0 ? NULL : mason_arena_alloc(arena, new_size);
+    }
+
+    size_t old_aligned = align_up_pow2(old_size, _MASON_ARENA_ALIGN);
+    size_t new_aligned = align_up_pow2(new_size, _MASON_ARENA_ALIGN);
+    MASON_ArenaBlock *current = arena->current;
+    unsigned char *expected_ptr = current->data + current->offset - old_aligned;
+
+    if ((unsigned char *)ptr == expected_ptr) {
+        size_t base_offset = current->offset - old_aligned;
+
+        if (base_offset + new_aligned <= current->capacity) {
+            current->offset = base_offset + new_aligned;
+            return new_size == 0 ? NULL : ptr;
+        }
+    }
+
+    if (new_size == 0) {
+        return NULL;
+    }
+
+    void *new_ptr = mason_arena_alloc(arena, new_size);
+    if (!new_ptr) {
+        return NULL;
+    }
+
+    memcpy(new_ptr, ptr, old_size < new_size ? old_size : new_size);
+    return new_ptr;
 }

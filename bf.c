@@ -10,12 +10,28 @@
 #include "mason_arena.h"
 
 #define TAPE_SIZE 30000
-#define MAX_INSTRUCTION_COUNT 4096
+#define DA_INITIAL_CAPACITY 256
+
+#define da_append_many(da, src, n)                                             \
+    do {                                                                       \
+        size_t item_size = sizeof(*(da)->items);                               \
+        while ((da)->count + (n) > (da)->capacity) {                           \
+            size_t new_capacity = (da)->capacity == 0 ? DA_INITIAL_CAPACITY    \
+                                                      : (da)->capacity * 2;    \
+            (da)->items = mason_arena_realloc(arena,                           \
+                                              (da)->items,                     \
+                                              (da)->capacity * item_size,      \
+                                              new_capacity * item_size);       \
+            assert((da)->items != NULL);                                       \
+            (da)->capacity = new_capacity;                                     \
+        }                                                                      \
+        memcpy((da)->items + (da)->count, (src), (n) * item_size);             \
+        (da)->count += (n);                                                    \
+    } while (0);
 
 static MASON_Arena *arena;
 
 typedef enum {
-    TOKEN_INVALID,
     TOKEN_END,
     TOKEN_RARROW,
     TOKEN_LARROW,
@@ -38,8 +54,9 @@ typedef enum {
 typedef struct Instruction Instruction;
 
 typedef struct {
-    Instruction **instructions;
+    Instruction **items;
     size_t count;
+    size_t capacity;
 } Program;
 
 struct Instruction {
@@ -53,6 +70,12 @@ struct Instruction {
 };
 
 typedef struct {
+    char *items;
+    size_t count;
+    size_t capacity;
+} Buffer;
+
+typedef struct {
     size_t pos;
     size_t bol;
     size_t row;
@@ -60,18 +83,16 @@ typedef struct {
 
 typedef struct {
     const char *source;
-    size_t length;
+    size_t count;
 
     Cursor cur;
-
     TokenKind token;
 } Lexer;
 
 typedef struct {
-    int8_t *tape;
+    uint8_t *tape;
     size_t tape_size;
-    size_t data_ptr;
-    size_t bf_ptr;
+    ptrdiff_t data_ptr;
 } Brainfuck;
 
 Instruction *change_ptr(ptrdiff_t diff)
@@ -118,26 +139,22 @@ Instruction *loop(size_t count, ...)
     va_list args;
     va_start(args, count);
 
-    Instruction **instructions =
-        mason_arena_alloc(arena, count * sizeof(*instructions));
+    Program p = {0};
     for (size_t i = 0; i < count; i++) {
-        instructions[i] = va_arg(args, Instruction *);
+        Instruction *inst = va_arg(args, Instruction *);
+        da_append_many(&p, &inst, 1);
     }
     va_end(args);
 
     Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
     inst->kind = BF_LOOP;
-    inst->as.loop.instructions = instructions;
-    inst->as.loop.count = count;
+    inst->as.loop = p;
     return inst;
 }
 
 void display_token(TokenKind kind)
 {
     switch (kind) {
-    case TOKEN_INVALID:
-        printf("TOKEN_INVALID\n");
-        break;
     case TOKEN_END:
         printf("TOKEN_END\n");
         break;
@@ -197,7 +214,7 @@ void display_instruction(Instruction *inst)
     case BF_LOOP:
         putchar('[');
         for (size_t i = 0; i < inst->as.loop.count; i++) {
-            display_instruction(inst->as.loop.instructions[i]);
+            display_instruction(inst->as.loop.items[i]);
         }
         putchar(']');
         break;
@@ -209,7 +226,7 @@ void display_instruction(Instruction *inst)
 void display_program(Program p)
 {
     for (size_t i = 0; i < p.count; i++) {
-        display_instruction(p.instructions[i]);
+        display_instruction(p.items[i]);
     }
 }
 
@@ -235,7 +252,7 @@ void display_instruction_tree(Instruction *inst, size_t depth)
     case BF_LOOP:
         printf("BF_LOOP:\n");
         for (size_t i = 0; i < inst->as.loop.count; i++) {
-            display_instruction_tree(inst->as.loop.instructions[i], depth + 1);
+            display_instruction_tree(inst->as.loop.items[i], depth + 1);
         }
         break;
     default:
@@ -246,13 +263,13 @@ void display_instruction_tree(Instruction *inst, size_t depth)
 void display_program_tree(Program p)
 {
     for (size_t i = 0; i < p.count; i++) {
-        display_instruction_tree(p.instructions[i], 0);
+        display_instruction_tree(p.items[i], 0);
     }
 }
 
 char lexer_current_char(Lexer *l)
 {
-    if (l->cur.pos >= l->length)
+    if (l->cur.pos >= l->count)
         return '\0';
 
     return l->source[l->cur.pos];
@@ -260,7 +277,7 @@ char lexer_current_char(Lexer *l)
 
 char lexer_next_char(Lexer *l)
 {
-    if (l->cur.pos >= l->length)
+    if (l->cur.pos >= l->count)
         return 0;
 
     char c = l->source[l->cur.pos++];
@@ -287,132 +304,125 @@ bool lexer_next(Lexer *l)
     switch (c) {
     case '>':
         l->token = TOKEN_RARROW;
-        break;
+        return true;
     case '<':
         l->token = TOKEN_LARROW;
-        break;
+        return true;
     case '+':
         l->token = TOKEN_PLUS;
-        break;
+        return true;
     case '-':
         l->token = TOKEN_MINUS;
-        break;
+        return true;
     case '.':
         l->token = TOKEN_DOT;
-        break;
+        return true;
     case ',':
         l->token = TOKEN_COMMA;
-        break;
+        return true;
     case '[':
         l->token = TOKEN_OBRACKET;
-        break;
+        return true;
     case ']':
         l->token = TOKEN_CBRACKET;
-        break;
-    default:
-        l->token = TOKEN_INVALID;
-        return false;
+        return true;
+    default: // Ignore unknown chars
+        return lexer_next(l);
     }
-
-    return true;
-}
-
-bool lexer_expect(Lexer *l, TokenKind expected)
-{
-    if (!lexer_next(l))
-        return false;
-    return l->token == expected;
 }
 
 size_t lexer_forward_count(Lexer *l, TokenKind expected)
 {
     size_t count = 0;
 
-    Cursor saved = l->cur;
-    while (lexer_expect(l, expected)) {
+    while (true) {
+        Cursor saved = l->cur;
+        if (!lexer_next(l) || l->token != expected) {
+            l->cur = saved;
+            break;
+        }
         count++;
-        saved = l->cur;
     }
-    l->cur = saved;
 
     return count;
 }
 
-Program invalid_program() { return (Program){NULL, 0}; }
+Program invalid_program() { return (Program){NULL, 0, 0}; }
 
 Program parse_program(Lexer *l, TokenKind stop_token)
 {
     Program p = {0};
-    p.instructions = mason_arena_calloc(arena,
-                                        MAX_INSTRUCTION_COUNT,
-                                        sizeof(*p.instructions));
 
-    while (lexer_next(l)) {
-        if (l->token == stop_token)
+    while (true) {
+        if (!lexer_next(l)) {
+            return (stop_token == TOKEN_END ? p : invalid_program());
+        }
+
+        if (l->token == stop_token) {
             return p;
-
-        assert(p.count < MAX_INSTRUCTION_COUNT);
+        }
 
         Instruction *inst;
-
         switch (l->token) {
         case TOKEN_RARROW:
             inst = change_ptr(lexer_forward_count(l, TOKEN_RARROW) + 1);
             break;
-
         case TOKEN_LARROW:
             inst = change_ptr(-(lexer_forward_count(l, TOKEN_LARROW) + 1));
             break;
         case TOKEN_PLUS:
             inst = change_data(lexer_forward_count(l, TOKEN_PLUS) + 1);
             break;
-
         case TOKEN_MINUS:
             inst = change_data(-(lexer_forward_count(l, TOKEN_MINUS) + 1));
             break;
-
         case TOKEN_DOT:
             inst = output(lexer_forward_count(l, TOKEN_DOT) + 1);
             break;
-
         case TOKEN_COMMA:
             inst = input();
             break;
 
         case TOKEN_OBRACKET:
+            Cursor bracket_cur = l->cur;
             Program body = parse_program(l, TOKEN_CBRACKET);
-            if (body.instructions == NULL) {
-                fprintf(stderr, "ERROR: Failed to parse loop");
+            if (l->token != TOKEN_CBRACKET) {
+                fprintf(stderr,
+                        "ERROR: Unmatched '[' at line %zu, column %zu: "
+                        "expected ']' but got ",
+                        bracket_cur.row + 1,
+                        bracket_cur.pos - bracket_cur.bol);
+                display_token(l->token);
                 return invalid_program();
             }
             inst = loop_from_program(body);
             break;
+
         default:
-            // TODO: print location
-            fprintf(stderr, "ERROR: Unexepcted token: ");
+            fprintf(stderr,
+                    "ERROR: Unexpected token at line %zu, column %zu: ",
+                    l->cur.row + 1,
+                    l->cur.pos - l->cur.bol);
             display_token(l->token);
             return invalid_program();
         }
 
-        p.instructions[p.count++] = inst;
+        da_append_many(&p, &inst, 1);
     }
-
-    if (l->token == stop_token)
-        return p;
-
-    return invalid_program();
 }
 
 void run_program(Brainfuck *bf, Program program)
 {
+    size_t ip = 0;
 
-    while (bf->bf_ptr < program.count) {
-        Instruction *inst = program.instructions[bf->bf_ptr];
+    while (ip < program.count) {
+        Instruction *inst = program.items[ip];
 
         switch (inst->kind) {
         case BF_CHANGE_PTR:
             bf->data_ptr += inst->as.ptr_diff;
-            assert(bf->data_ptr < TAPE_SIZE);
+            bf->data_ptr =
+                (bf->data_ptr % bf->tape_size + bf->tape_size) % bf->tape_size;
             break;
         case BF_CHANGE_DATA:
             bf->tape[bf->data_ptr] += inst->as.data_diff;
@@ -423,53 +433,73 @@ void run_program(Brainfuck *bf, Program program)
             }
             break;
         case BF_INPUT:
-            bf->tape[bf->data_ptr] = getchar();
+            int c = getchar();
+            bf->tape[bf->data_ptr] = (c == EOF) ? 0 : (uint8_t)c;
             break;
         case BF_LOOP:
             while (bf->tape[bf->data_ptr] != 0) {
-                size_t saved = bf->bf_ptr;
-                bf->bf_ptr = 0;
                 run_program(bf, inst->as.loop);
-                bf->bf_ptr = saved;
             }
             break;
         default:
             assert(0 && "UNREACHABLE: InstructionKind");
         }
 
-        bf->bf_ptr++;
+        ip++;
     }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
-    arena = mason_arena_create(1024 * 1024);
-    assert(arena != NULL);
-
-    // Brainfuck quine by Erik Bosman
-    char *program_source =
-        "->++>+++>+>+>++>>+>+>+++>>+>+>++>+++>+++>+>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-        ">>>>>+>+>++>>>+++>>>>>+++>+>>>>>>>>>>>>>>>>>>>>>>+++>>>>>>>++>+++>+++>"
-        "+>>+++>+++>+>+++>+>+++>+>++>+++>>>+>+>+>+>++>+++>+>+>>+++>>>>>>>+>+>>>"
-        "+>+>++>+++>+++>+>>+++>+++>+>+++>+>++>+++>++>>+>+>++>+++>+>+>>+++>>>+++"
-        ">+>>>++>+++>+++>+>>+++>>>+++>+>+++>+>>+++>>+++>>+[[>>+[>]+>+[<]<-]>>[>"
-        "]<+<+++[<]<<+]>>>[>]+++[++++++++++>++[-<++++++++++++++++>]<.<-<]";
-
-    Lexer l = {
-        .source = program_source,
-        .length = strlen(program_source),
-    };
-    Program p = parse_program(&l, TOKEN_END);
-    if (p.instructions == NULL) {
-        fprintf(stderr, "ERROR: Invalid program");
+    char *program = argv[0];
+    if (--argc < 1) {
+        fprintf(stderr, "USAGE: %s <filename>", program);
         return 1;
     }
 
+    char *source_file = argv[1];
+    FILE *f = fopen(source_file, "r");
+    if (!f) {
+        fprintf(stderr,
+                "ERROR: Failed to open %s: %s",
+                source_file,
+                strerror(errno));
+        return 1;
+    }
+
+    arena = mason_arena_create(1024 * 1024);
+    assert(arena != NULL);
+
+    Buffer buf = {0};
+    char chunk[4096];
+    while (!feof(f)) {
+        size_t read = fread(chunk, 1, sizeof(chunk), f);
+        da_append_many(&buf, chunk, read);
+    }
+    if (buf.count == 0) {
+        fprintf(stderr, "ERROR: Empty input file\n");
+        mason_arena_destroy(arena);
+        return 1;
+    }
+
+    Lexer l = {
+        .source = buf.items,
+        .count = buf.count,
+    };
+    Program p = parse_program(&l, TOKEN_END);
+    if (p.items == NULL) {
+        fprintf(stderr, "ERROR: Invalid program\n");
+        mason_arena_destroy(arena);
+        return 1;
+    }
+
+#ifdef TRACE_PROGRAM
     printf("Program tree:\n");
     display_program_tree(p);
     printf("\nProgram reconstructed from tree:\n");
     display_program(p);
     printf("\n\nOutput:\n");
+#endif
 
     Brainfuck bf = {
         .tape = mason_arena_calloc(arena, TAPE_SIZE, sizeof(*bf.tape)),

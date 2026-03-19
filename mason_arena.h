@@ -36,4 +36,10 @@ void mason_arena_rewind(MASON_Arena *arena, MASON_ArenaMark mark);
 void mason_arena_reset(MASON_Arena *arena);
 void mason_arena_destroy(MASON_Arena *arena);
 
+// New
+void *mason_arena_realloc(MASON_Arena *arena,
+                          void *ptr,
+                          size_t old_size,
+                          size_t new_size);
+
 #endif // MASON_ARENA
