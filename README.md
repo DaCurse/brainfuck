@@ -21,5 +21,6 @@ make bf_opt
 ./bf examples/helloworld.b
 ./bf examples/rot13.b
 ./bf_opt examples/bitwidth.b
+# helloworld_compact.b is specifically made to be fed into brainfuck in brainfuck 
 cat examples/helloworld_compact.b | ./bf_opt examples/brainfuck.b
 ```

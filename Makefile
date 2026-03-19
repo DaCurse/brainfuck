@@ -15,6 +15,10 @@ else ifeq ($(BIGNUM),32)
 DEFINES += -DBF_BIGNUM32
 endif
 
+ifeq ($(PROFILE), 1)
+DEFINES += -DPROFILE
+endif
+
 bf: bf.c mason_arena.c
 	$(CC) $(CFLAGS) $(DEFINES) -o bf bf.c mason_arena.c
 

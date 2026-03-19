@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "mason_arena.h"
 
@@ -32,6 +33,27 @@
         memcpy((da)->items + (da)->count, (src), (n) * item_size);             \
         (da)->count += (n);                                                    \
     } while (0);
+
+#ifdef PROFILE
+#define PROFILE_START(name)                                                    \
+    struct timespec _timer_##name;                                             \
+    clock_gettime(CLOCK_MONOTONIC, &_timer_##name)
+#define PROFILE_END(name)                                                      \
+    printf("PROFILE: " #name " took %.3fms\n", timer_elapsed(&_timer_##name))
+#else
+#define PROFILE_START(_name) (void)0
+#define PROFILE_END(_name) (void)(0)
+#endif
+
+static inline double timer_elapsed(struct timespec *t)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    double ms = (double)(now.tv_sec - t->tv_sec) * 1e3;
+    ms += (double)(now.tv_nsec - t->tv_nsec) / 1e6;
+    return ms;
+}
 
 static MASON_Arena *arena;
 
@@ -517,7 +539,11 @@ int main(int argc, char **argv)
         .source = buf.items,
         .count = buf.count,
     };
+
+    PROFILE_START(parse_program);
     Program p = parse_program(&l, TOKEN_END);
+    PROFILE_END(parse_program);
+
     if (!p.valid) {
         fprintf(stderr, "ERROR: Invalid program\n");
         mason_arena_destroy(arena);
@@ -540,7 +566,13 @@ int main(int argc, char **argv)
         .tape = mason_arena_calloc(arena, TAPE_SIZE, sizeof(*bf.tape)),
         .tape_size = TAPE_SIZE,
     };
+
+    PROFILE_START(run_program);
     run_program(&bf, p);
+#ifdef PROFILE // In case program doesn't output a newline
+    fprintf(stderr, "\n");
+#endif
+    PROFILE_END(run_program);
 
     mason_arena_destroy(arena);
     return 0;
