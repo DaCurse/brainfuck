@@ -39,7 +39,9 @@
     struct timespec _timer_##name;                                             \
     clock_gettime(CLOCK_MONOTONIC, &_timer_##name)
 #define PROFILE_END(name)                                                      \
-    printf("PROFILE: " #name " took %.3fms\n", timer_elapsed(&_timer_##name))
+    fprintf(stderr,                                                            \
+            "PROFILE: " #name " took %.3fms\n",                                \
+            timer_elapsed(&_timer_##name))
 #else
 #define PROFILE_START(_name) (void)0
 #define PROFILE_END(_name) (void)(0)

@@ -3,3 +3,4 @@ bf
 *.o
 .vscode/
 *.swp
+venv/
