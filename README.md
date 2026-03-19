@@ -2,6 +2,8 @@
 
 Brainfuck interpreter in C
 
+Converts BF into a more compact instruction AST, then compiles the AST to a linear bytecode before interpreting it.
+
 ## Build
 
 ```bash

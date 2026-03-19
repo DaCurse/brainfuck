@@ -118,6 +118,26 @@ typedef struct {
     TokenKind token;
 } Lexer;
 
+typedef enum {
+    OP_PTR,
+    OP_DATA,
+    OP_OUT,
+    OP_IN,
+    OP_JZ,
+    OP_JNZ,
+} OpcodeKind;
+
+typedef struct {
+    OpcodeKind kind;
+    int64_t arg;
+} Opcode;
+
+typedef struct {
+    Opcode *items;
+    size_t count;
+    size_t capacity;
+} Opcodes;
+
 #ifdef BF_BIGNUM16
 typedef uint16_t Cell;
 #elif defined(BF_BIGNUM32)
@@ -307,6 +327,40 @@ void display_program_tree(Program p)
     }
 }
 
+void display_opcode(Opcode op)
+{
+    switch (op.kind) {
+    case OP_DATA:
+        printf("DATA %+lld\n", op.arg);
+        break;
+    case OP_PTR:
+        printf("PTR %+lld\n", op.arg);
+        break;
+    case OP_OUT:
+        printf("OUT %lld\n", op.arg);
+        break;
+    case OP_IN:
+        printf("IN\n");
+        break;
+    case OP_JZ:
+        printf("JZ %lld\n", op.arg);
+        break;
+    case OP_JNZ:
+        printf("JNZ %lld\n", op.arg);
+        break;
+    default:
+        assert(0 && "UNREACHABLE: OpcodeKind");
+    }
+}
+
+void display_opcodes(Opcodes ops)
+{
+    for (size_t i = 0; i < ops.count; i++) {
+        printf("    %08lld ", i);
+        display_opcode(ops.items[i]);
+    }
+}
+
 char lexer_current_char(Lexer *l)
 {
     if (l->cur.pos >= l->count)
@@ -471,41 +525,111 @@ Program parse_program(Lexer *l, TokenKind stop_token)
     }
 }
 
-void run_program(Brainfuck *bf, Program program)
+Opcode opcode(OpcodeKind kind, int64_t arg)
 {
-    size_t ip = 0;
+    return (Opcode){.kind = kind, .arg = arg};
+}
 
-    while (ip < program.count) {
-        Instruction *inst = program.items[ip];
+void compile_program_into(Opcodes *ops, Program p)
+{
+    for (size_t i = 0; i < p.count; i++) {
+        Instruction *inst = p.items[i];
 
         switch (inst->kind) {
-        case BF_CHANGE_PTR:
-            bf->data_ptr += inst->as.ptr_diff;
-            ptrdiff_t tape_size = (ptrdiff_t)bf->tape_size;
-            bf->data_ptr = (bf->data_ptr % tape_size + tape_size) % tape_size;
-            break;
-        case BF_CHANGE_DATA:
-            bf->tape[bf->data_ptr] += inst->as.data_diff;
-            break;
-        case BF_OUTPUT:
-            for (size_t i = 0; i < inst->as.output_count; i++) {
-                putchar(bf->tape[bf->data_ptr]);
-            }
-            break;
-        case BF_INPUT:
-            int c = getchar();
-            bf->tape[bf->data_ptr] = (c == EOF) ? 0 : (Cell)c;
-            break;
-        case BF_LOOP:
-            while (bf->tape[bf->data_ptr] != 0) {
-                run_program(bf, inst->as.loop);
-            }
-            break;
+        case BF_CHANGE_PTR: {
+            Opcode op = opcode(OP_PTR, inst->as.ptr_diff);
+            da_append_many(ops, &op, 1);
+        } break;
+        case BF_CHANGE_DATA: {
+            Opcode op = opcode(OP_DATA, inst->as.data_diff);
+            da_append_many(ops, &op, 1);
+        } break;
+        case BF_OUTPUT: {
+            Opcode op = opcode(OP_OUT, inst->as.output_count);
+            da_append_many(ops, &op, 1);
+        } break;
+        case BF_INPUT: {
+            Opcode op = opcode(OP_IN, 0);
+            da_append_many(ops, &op, 1);
+        } break;
+        case BF_LOOP: {
+            size_t jz_pos = ops->count;
+            Opcode op_loop_start = opcode(OP_JZ, 0);
+            da_append_many(ops, &op_loop_start, 1);
+
+            compile_program_into(ops, inst->as.loop);
+
+            size_t jnz_pos = ops->count;
+            Opcode op_loop_end = opcode(OP_JNZ, (int64_t)(jz_pos + 1));
+            da_append_many(ops, &op_loop_end, 1);
+
+            // Set JZ address after recursively expanding the loop
+            ops->items[jz_pos].arg = (int64_t)(jnz_pos + 1);
+        } break;
         default:
             assert(0 && "UNREACHABLE: InstructionKind");
         }
+    }
+}
 
-        ip++;
+Opcodes compile_program(Program p)
+{
+    Opcodes ops = {0};
+    compile_program_into(&ops, p);
+    return ops;
+}
+
+void run_program(Brainfuck *bf, Opcodes ops)
+{
+    size_t ip = 0;
+
+    while (ip < ops.count) {
+        Opcode *op = &ops.items[ip];
+
+        switch (op->kind) {
+        case OP_PTR: {
+            bf->data_ptr += (ptrdiff_t)op->arg;
+
+            if (bf->data_ptr < 0) {
+                bf->data_ptr += bf->tape_size;
+            } else if (bf->data_ptr >= (ptrdiff_t)bf->tape_size) {
+                bf->data_ptr -= bf->tape_size;
+            }
+
+            ip++;
+        } break;
+        case OP_DATA: {
+            bf->tape[bf->data_ptr] += op->arg;
+            ip++;
+        } break;
+        case OP_OUT: {
+            for (size_t i = 0; i < (size_t)op->arg; i++) {
+                putchar(bf->tape[bf->data_ptr]);
+            }
+            ip++;
+        } break;
+        case OP_IN: {
+            int c = getchar();
+            bf->tape[bf->data_ptr] = (c == EOF) ? 0 : (Cell)c;
+            ip++;
+        } break;
+        case OP_JZ: {
+            if (bf->tape[bf->data_ptr] == 0) {
+                ip = (size_t)op->arg;
+            } else {
+                ip++;
+            }
+        } break;
+        case OP_JNZ: {
+            if (bf->tape[bf->data_ptr] != 0) {
+                ip = (size_t)op->arg;
+            } else {
+                ip++;
+            }
+        } break;
+        default:
+            assert(0 && "UNREACHABLE: OpcodeKind");
+        }
     }
 }
 
@@ -521,7 +645,7 @@ int main(int argc, char **argv)
     FILE *f = fopen(source_file, "r");
     if (!f) {
         fprintf(stderr,
-                "ERROR: Failed to open %s: %s",
+                "ERROR: Failed to open %s: %s\n",
                 source_file,
                 strerror(errno));
         return 1;
@@ -568,6 +692,15 @@ int main(int argc, char **argv)
     display_program_tree(p);
     printf("\nProgram reconstructed from tree:\n");
     display_program(p);
+#endif
+
+    PROFILE_START(compile_program);
+    Opcodes ops = compile_program(p);
+    PROFILE_END(compile_program);
+
+#ifdef TRACE_PROGRAM
+    printf("\nOpcodes:\n");
+    display_opcodes(ops);
     printf("\n\nOutput:\n");
 #endif
 
@@ -577,10 +710,7 @@ int main(int argc, char **argv)
     };
 
     PROFILE_START(run_program);
-    run_program(&bf, p);
-#ifdef PROFILE // In case program doesn't output a newline
-    fprintf(stderr, "\n");
-#endif
+    run_program(&bf, ops);
     PROFILE_END(run_program);
 
     mason_arena_destroy(arena);
