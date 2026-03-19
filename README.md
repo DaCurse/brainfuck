@@ -1,6 +1,6 @@
 # Brainfuck
 
-Brainfuck interpreter in C.
+Brainfuck interpreter in C
 
 ## Build
 
@@ -9,8 +9,8 @@ Brainfuck interpreter in C.
 make
 # enable trace output
 make TRACE=1
-# enable big-number mode (16 bit cells)
-make BIGNUM=1
+# enable "Bignum" cells 
+make BIGNUM=16 # or BIGNUM=32 for 32-bit cells
 # compile with -O3
 make bf_opt
 ```

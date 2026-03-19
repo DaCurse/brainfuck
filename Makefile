@@ -8,8 +8,11 @@ DEFINES =
 ifeq ($(TRACE),1)
 DEFINES += -DTRACE_PROGRAM
 endif
-ifeq ($(BIGNUM),1)
-DEFINES += -DBRAINFUCK_BIGNUM
+
+ifeq ($(BIGNUM),16)
+DEFINES += -DBF_BIGNUM16
+else ifeq ($(BIGNUM),32)
+DEFINES += -DBF_BIGNUM32
 endif
 
 bf: bf.c mason_arena.c

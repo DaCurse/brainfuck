@@ -94,10 +94,12 @@ typedef struct {
     TokenKind token;
 } Lexer;
 
-#ifndef BRAINFUCK_BIGNUM
-typedef uint8_t Cell;
-#else
+#ifdef BF_BIGNUM16
 typedef uint16_t Cell;
+#elif defined(BF_BIGNUM32)
+typedef uint32_t Cell;
+#else
+typedef uint8_t Cell;
 #endif
 
 typedef struct {
