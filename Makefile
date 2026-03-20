@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -ggdb -Wall -Wextra
+CFLAGS = -std=c23 -ggdb -Wall -Wextra
 OPT_CFLAGS = -O3 -DNDEBUG -Wall -Wextra
 TRACE ?= 0
 BIGNUM ?= 0

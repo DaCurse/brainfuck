@@ -145,7 +145,10 @@ typedef enum {
 
 typedef struct {
     OpcodeKind kind;
-    int64_t arg;
+    union {
+        int64_t i64;
+        int32_t i32[2];
+    } arg;
 } Opcode;
 
 typedef struct {
@@ -300,33 +303,20 @@ void display_instructions_tree(Instructions insts)
     }
 }
 
-static inline void unpack_i64(int64_t val, int32_t *out_a, int32_t *out_b)
-{
-    *out_a = (int32_t)(val >> 32);
-    *out_b = (int32_t)(val & 0xFFFFFFFF);
-}
-
-static inline int64_t pack_i64(int32_t a, int32_t b)
-{
-    return (int64_t)(((uint64_t)(uint32_t)a << 32) | (uint32_t)b);
-}
-
 void display_opcode(Opcode op)
 {
     switch (op.kind) {
-    case OP_DATA: printf("DATA %+" PRId64 "\n", op.arg); break;
-    case OP_PTR: printf("PTR %+" PRId64 "\n", op.arg); break;
-    case OP_OUT: printf("OUT %" PRId64 "\n", op.arg); break;
+    case OP_DATA: printf("DATA %+" PRId64 "\n", op.arg.i64); break;
+    case OP_PTR: printf("PTR %+" PRId64 "\n", op.arg.i64); break;
+    case OP_OUT: printf("OUT %" PRId64 "\n", op.arg.i64); break;
     case OP_IN: printf("IN\n"); break;
-    case OP_JZ: printf("JZ %" PRId64 "\n", op.arg); break;
-    case OP_JNZ: printf("JNZ %" PRId64 "\n", op.arg); break;
+    case OP_JZ: printf("JZ %" PRId64 "\n", op.arg.i64); break;
+    case OP_JNZ: printf("JNZ %" PRId64 "\n", op.arg.i64); break;
     case OP_CLR: printf("CLR\n"); break;
     case OP_MOVEADD: {
-        int32_t offset, mul;
-        unpack_i64(op.arg, &offset, &mul);
-        printf("MOVEADD %+d, %+d\n", offset, mul);
+        printf("MOVEADD %+d, %+d\n", op.arg.i32[0], op.arg.i32[1]);
     } break;
-    case OP_SCAN: printf("SCAN %+" PRId64 "\n", op.arg); break;
+    case OP_SCAN: printf("SCAN %+" PRId64 "\n", op.arg.i64); break;
     default: assert(0 && "UNREACHABLE: OpcodeKind");
     }
 }
@@ -480,9 +470,16 @@ Instructions parse_instructions(Lexer *l, TokenKind stop_token)
     }
 }
 
+Opcode invalid_opcode() { return (Opcode){.kind = OP_INVALID}; }
+
 Opcode opcode(OpcodeKind kind, int64_t arg)
 {
-    return (Opcode){.kind = kind, .arg = arg};
+    return (Opcode){.kind = kind, .arg.i64 = arg};
+}
+
+Opcode opcode2(OpcodeKind kind, int32_t a, int32_t b)
+{
+    return (Opcode){.kind = kind, .arg.i32 = {a, b}};
 }
 
 void compile_instructions_into(Program *p, Instructions *insts);
@@ -496,7 +493,7 @@ Opcode detect_clear(Instructions *body)
         return opcode(OP_CLR, 0);
     }
 
-    return opcode(OP_INVALID, 0);
+    return invalid_opcode();
 }
 
 Opcode detect_moveadd(Instructions *body)
@@ -507,7 +504,7 @@ Opcode detect_moveadd(Instructions *body)
 
     // Always 4 instructions because we compress repeated instructions
     if (body->count != 4) {
-        return opcode(OP_INVALID, 0);
+        return invalid_opcode();
     }
 
     // ptr tracks our current position relative to the origin cell.
@@ -528,29 +525,27 @@ Opcode detect_moveadd(Instructions *body)
         case INST_CHANGE_DATA: {
             if (ptr == 0) {
                 // we're on the origin cell, must be the loop counter decrement
-                if (inst->as.data_diff != -1) return opcode(OP_INVALID, 0);
-                if (saw_decrement) return opcode(OP_INVALID, 0);
+                if (inst->as.data_diff != -1) return invalid_opcode();
+                if (saw_decrement) return invalid_opcode();
                 saw_decrement = true;
             } else {
                 // we're on the target cell, the data diff is the multiplier
                 mul = (int32_t)inst->as.data_diff;
-                if (saw_increment) return opcode(OP_INVALID, 0);
+                if (saw_increment) return invalid_opcode();
                 saw_increment = true;
                 // record the target cell's offset
                 offset = (int32_t)ptr;
             }
         } break;
-        default: return opcode(OP_INVALID, 0);
+        default: return invalid_opcode();
         }
     }
 
     if (!saw_decrement || !saw_increment || ptr != 0) {
-        return opcode(OP_INVALID, 0);
+        return invalid_opcode();
     }
 
-    // Pack offset and multiplier into arg
-    int64_t arg = pack_i64(offset, mul);
-    return opcode(OP_MOVEADD, arg);
+    return opcode2(OP_MOVEADD, offset, mul);
 }
 
 Opcode detect_scan(Instructions *body)
@@ -560,7 +555,7 @@ Opcode detect_scan(Instructions *body)
         return opcode(OP_SCAN, body->items[0]->as.ptr_diff);
     }
 
-    return opcode(OP_INVALID, 0);
+    return invalid_opcode();
 }
 
 typedef Opcode (*OptimizationDetector)(Instructions *body);
@@ -596,7 +591,7 @@ void compile_loop(Program *p, Instructions *body)
         da_append(p, &op_loop_end);
 
         // Set JZ address after recursively expanding the loop
-        p->items[jz_pos].arg = (int64_t)(jnz_pos + 1);
+        p->items[jz_pos].arg.i64 = (int64_t)(jnz_pos + 1);
     }
 }
 
@@ -676,15 +671,15 @@ void run_program(Brainfuck *bf, Program p)
 
         switch (op->kind) {
         case OP_PTR: {
-            bf_move_ptr(bf, (ptrdiff_t)op->arg);
+            bf_move_ptr(bf, (ptrdiff_t)op->arg.i64);
             ip++;
         } break;
         case OP_DATA: {
-            bf->tape[bf->data_ptr] += op->arg;
+            bf->tape[bf->data_ptr] += op->arg.i64;
             ip++;
         } break;
         case OP_OUT: {
-            for (size_t i = 0; i < (size_t)op->arg; i++) {
+            for (size_t i = 0; i < (size_t)op->arg.i64; i++) {
                 putchar(bf->tape[bf->data_ptr]);
             }
             ip++;
@@ -696,14 +691,14 @@ void run_program(Brainfuck *bf, Program p)
         } break;
         case OP_JZ: {
             if (bf->tape[bf->data_ptr] == 0) {
-                ip = (size_t)op->arg;
+                ip = (size_t)op->arg.i64;
             } else {
                 ip++;
             }
         } break;
         case OP_JNZ: {
             if (bf->tape[bf->data_ptr] != 0) {
-                ip = (size_t)op->arg;
+                ip = (size_t)op->arg.i64;
             } else {
                 ip++;
             }
@@ -713,15 +708,15 @@ void run_program(Brainfuck *bf, Program p)
             ip++;
         } break;
         case OP_MOVEADD: {
-            int32_t offset, mul;
-            unpack_i64(op->arg, &offset, &mul);
+            int32_t offset = op->arg.i32[0];
+            int32_t mul = op->arg.i32[1];
             bf->tape[bf->data_ptr + offset] += bf->tape[bf->data_ptr] * mul;
             bf->tape[bf->data_ptr] = 0;
             ip++;
         } break;
         case OP_SCAN: {
             while (bf->tape[bf->data_ptr] != 0) {
-                bf_move_ptr(bf, (ptrdiff_t)op->arg);
+                bf_move_ptr(bf, (ptrdiff_t)op->arg.i64);
             }
             ip++;
         } break;
