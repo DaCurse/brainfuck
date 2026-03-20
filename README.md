@@ -6,16 +6,10 @@ Converts BF into a more compact instruction AST, then compiles the AST to a line
 
 Has some optimization opcodes:
 
-```c
-/* Set current cell to 0 */
-OP_CLR,
-/* Add value from current cell to a cell at offset `arg` and set current
-    cell to 0*/
-OP_MOVEADD,
-/* Move cells right or left in steps of `arg` until you find a cell that
-    contains 0 */
-OP_SCAN,
-```
+* `OP_CLR` - Set current cell to 0.
+* `OP_MOVEADD` - Add value from current cell to a cell at offset `arg` and set current
+    cell to 0.
+* `OP_SCAN`- Move cells right or left in steps of `arg` until you find a cell that contains 0.
 
 ## Build
 

@@ -78,11 +78,11 @@ typedef enum {
 } TokenKind;
 
 typedef enum {
-    BF_CHANGE_PTR,
-    BF_CHANGE_DATA,
-    BF_OUTPUT,
-    BF_INPUT,
-    BF_LOOP
+    INST_MOVE_PTR,
+    INST_CHANGE_DATA,
+    INST_OUTPUT,
+    INST_INPUT,
+    INST_LOOP
 } InstructionKind;
 
 typedef struct Instruction Instruction;
@@ -128,22 +128,17 @@ typedef enum {
     OP_INVALID,
 
     // Default bf opcodes
-    OP_PTR,
-    OP_DATA,
-    OP_OUT,
-    OP_IN,
-    OP_JZ,
-    OP_JNZ,
+    OP_PTR,  // PTR diff
+    OP_DATA, // DATA diff
+    OP_OUT,  // OUT cnt
+    OP_IN,   // IN
+    OP_JZ,   // JZ addr
+    OP_JNZ,  // JNZ addr
 
     // Optimizations
-    /* Set current cell to 0 */
-    OP_CLR,
-    /* Add value from current cell to a cell at offset `arg` and set current
-       cell to 0*/
-    OP_MOVEADD,
-    /* Move cells right or left in steps of `arg` until you find a cell that
-       contains 0 */
-    OP_SCAN,
+    OP_CLR,     // CLR
+    OP_MOVEADD, // MOVEADD offset, mul
+    OP_SCAN,    // SCAN step
 
     OP_MAX
 } OpcodeKind;
@@ -173,10 +168,10 @@ typedef struct {
     ptrdiff_t data_ptr;
 } Brainfuck;
 
-Instruction *change_ptr(ptrdiff_t diff)
+Instruction *move_ptr(ptrdiff_t diff)
 {
     Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = BF_CHANGE_PTR;
+    inst->kind = INST_MOVE_PTR;
     inst->as.ptr_diff = diff;
     return inst;
 }
@@ -184,7 +179,7 @@ Instruction *change_ptr(ptrdiff_t diff)
 Instruction *change_data(int32_t diff)
 {
     Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = BF_CHANGE_DATA;
+    inst->kind = INST_CHANGE_DATA;
     inst->as.data_diff = diff;
     return inst;
 }
@@ -192,7 +187,7 @@ Instruction *change_data(int32_t diff)
 Instruction *output(size_t count)
 {
     Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = BF_OUTPUT;
+    inst->kind = INST_OUTPUT;
     inst->as.output_count = count;
     return inst;
 }
@@ -200,14 +195,14 @@ Instruction *output(size_t count)
 Instruction *input()
 {
     Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = BF_INPUT;
+    inst->kind = INST_INPUT;
     return inst;
 }
 
 Instruction *loop(Instructions body)
 {
     Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = BF_LOOP;
+    inst->kind = INST_LOOP;
     inst->as.loop = body;
     return inst;
 }
@@ -231,7 +226,7 @@ void display_token(TokenKind kind)
 void display_instruction_source(Instruction *inst)
 {
     switch (inst->kind) {
-    case BF_CHANGE_PTR: {
+    case INST_MOVE_PTR: {
         char inst_repr = inst->as.ptr_diff > 0 ? '>' : '<';
         ptrdiff_t abs_diff =
             inst->as.ptr_diff < 0 ? -inst->as.ptr_diff : inst->as.ptr_diff;
@@ -239,7 +234,7 @@ void display_instruction_source(Instruction *inst)
             putchar(inst_repr);
         }
     } break;
-    case BF_CHANGE_DATA: {
+    case INST_CHANGE_DATA: {
         char inst_repr = inst->as.data_diff > 0 ? '+' : '-';
         int32_t abs_diff =
             inst->as.data_diff < 0 ? -inst->as.data_diff : inst->as.data_diff;
@@ -247,13 +242,13 @@ void display_instruction_source(Instruction *inst)
             putchar(inst_repr);
         }
     } break;
-    case BF_OUTPUT:
+    case INST_OUTPUT:
         for (size_t i = 0; i < inst->as.output_count; i++) {
             putchar('.');
         }
         break;
-    case BF_INPUT: putchar(','); break;
-    case BF_LOOP:
+    case INST_INPUT: putchar(','); break;
+    case INST_LOOP:
         putchar('[');
         for (size_t i = 0; i < inst->as.loop.count; i++) {
             display_instruction_source(inst->as.loop.items[i]);
@@ -278,16 +273,18 @@ void display_instruction_tree(Instruction *inst, size_t depth)
     }
 
     switch (inst->kind) {
-    case BF_CHANGE_PTR:
-        printf("BF_CHANGE_PTR: %+td\n", inst->as.ptr_diff);
+    case INST_MOVE_PTR:
+        printf("INST_MOVE_PTR: %+td\n", inst->as.ptr_diff);
         break;
-    case BF_CHANGE_DATA:
-        printf("BF_CHANGE_DATA: %+d\n", inst->as.data_diff);
+    case INST_CHANGE_DATA:
+        printf("INST_CHANGE_DATA: %+d\n", inst->as.data_diff);
         break;
-    case BF_OUTPUT: printf("BF_OUTPUT: %zu\n", inst->as.output_count); break;
-    case BF_INPUT: printf("BF_INPUT\n"); break;
-    case BF_LOOP:
-        printf("BF_LOOP:\n");
+    case INST_OUTPUT:
+        printf("INST_OUTPUT: %zu\n", inst->as.output_count);
+        break;
+    case INST_INPUT: printf("INST_INPUT\n"); break;
+    case INST_LOOP:
+        printf("INST_LOOP:\n");
         for (size_t i = 0; i < inst->as.loop.count; i++) {
             display_instruction_tree(inst->as.loop.items[i], depth + 1);
         }
@@ -313,7 +310,11 @@ void display_opcode(Opcode op)
     case OP_JZ: printf("JZ %" PRId64 "\n", op.arg); break;
     case OP_JNZ: printf("JNZ %" PRId64 "\n", op.arg); break;
     case OP_CLR: printf("CLR\n"); break;
-    case OP_MOVEADD: printf("MOVEADD %+" PRId64 "\n", op.arg); break;
+    case OP_MOVEADD: {
+        int32_t offset = op.arg >> 32;
+        int32_t mul = (op.arg << 32) >> 32;
+        printf("MOVEADD %+d, %+d\n", offset, mul);
+    } break;
     case OP_SCAN: printf("SCAN %+" PRId64 "\n", op.arg); break;
     default: assert(0 && "UNREACHABLE: OpcodeKind");
     }
@@ -322,7 +323,7 @@ void display_opcode(Opcode op)
 void display_program(Program p)
 {
     for (size_t i = 0; i < p.count; i++) {
-        printf("    %zu ", i);
+        printf("    %08zu ", i);
         display_opcode(p.items[i]);
     }
 }
@@ -417,10 +418,10 @@ Instructions parse_instructions(Lexer *l, TokenKind stop_token)
         Instruction *inst;
         switch (l->token) {
         case TOKEN_RARROW: {
-            inst = change_ptr(lexer_forward_count(l, TOKEN_RARROW) + 1);
+            inst = move_ptr(lexer_forward_count(l, TOKEN_RARROW) + 1);
         } break;
         case TOKEN_LARROW: {
-            inst = change_ptr(-(lexer_forward_count(l, TOKEN_LARROW) + 1));
+            inst = move_ptr(-(lexer_forward_count(l, TOKEN_LARROW) + 1));
         } break;
         case TOKEN_PLUS: {
             inst = change_data(lexer_forward_count(l, TOKEN_PLUS) + 1);
@@ -478,7 +479,7 @@ void compile_instructions_into(Program *p, Instructions *insts);
 Opcode detect_clear(Instructions *body)
 {
     // Pattern: [-] or [+]
-    if (body->count == 1 && body->items[0]->kind == BF_CHANGE_DATA &&
+    if (body->count == 1 && body->items[0]->kind == INST_CHANGE_DATA &&
         (body->items[0]->as.data_diff == -1 ||
          body->items[0]->as.data_diff == 1)) {
         return opcode(OP_CLR, 0);
@@ -501,7 +502,8 @@ Opcode detect_moveadd(Instructions *body)
     // ptr tracks our current position relative to the origin cell.
     // it must return to 0 by the end, meaning the ptr moves are balanced.
     ptrdiff_t ptr = 0;
-    ptrdiff_t offset = 0;
+    int32_t offset = 0;
+    int32_t mul = 0;
     bool saw_decrement = false;
     bool saw_increment = false;
 
@@ -509,22 +511,22 @@ Opcode detect_moveadd(Instructions *body)
         Instruction *inst = body->items[i];
 
         switch (inst->kind) {
-        case BF_CHANGE_PTR: {
+        case INST_MOVE_PTR: {
             ptr += inst->as.ptr_diff;
         } break;
-        case BF_CHANGE_DATA: {
+        case INST_CHANGE_DATA: {
             if (ptr == 0) {
                 // we're on the origin cell, must be the loop counter decrement
                 if (inst->as.data_diff != -1) return opcode(OP_INVALID, 0);
                 if (saw_decrement) return opcode(OP_INVALID, 0);
                 saw_decrement = true;
             } else {
-                // we're on the target cell, must be a single increment
-                if (inst->as.data_diff != 1) return opcode(OP_INVALID, 0);
+                // we're on the target cell, the data diff is the multiplier
+                mul = (int32_t)inst->as.data_diff;
                 if (saw_increment) return opcode(OP_INVALID, 0);
                 saw_increment = true;
                 // record the target cell's offset
-                offset = ptr;
+                offset = (int32_t)ptr;
             }
         } break;
         default: return opcode(OP_INVALID, 0);
@@ -535,13 +537,15 @@ Opcode detect_moveadd(Instructions *body)
         return opcode(OP_INVALID, 0);
     }
 
-    return opcode(OP_MOVEADD, offset);
+    // Pack offset and multiplier into arg
+    int64_t arg = ((int64_t)offset << 32) + mul;
+    return opcode(OP_MOVEADD, arg);
 }
 
 Opcode detect_scan(Instructions *body)
 {
     // Detects patterns like [>] or [<] with any amount of < or > inside
-    if (body->count == 1 && body->items[0]->kind == BF_CHANGE_PTR) {
+    if (body->count == 1 && body->items[0]->kind == INST_MOVE_PTR) {
         return opcode(OP_SCAN, body->items[0]->as.ptr_diff);
     }
 
@@ -591,23 +595,23 @@ void compile_instructions_into(Program *p, Instructions *insts)
         Instruction *inst = insts->items[i];
 
         switch (inst->kind) {
-        case BF_CHANGE_PTR: {
+        case INST_MOVE_PTR: {
             Opcode op = opcode(OP_PTR, inst->as.ptr_diff);
             da_append(p, &op);
         } break;
-        case BF_CHANGE_DATA: {
+        case INST_CHANGE_DATA: {
             Opcode op = opcode(OP_DATA, inst->as.data_diff);
             da_append(p, &op);
         } break;
-        case BF_OUTPUT: {
+        case INST_OUTPUT: {
             Opcode op = opcode(OP_OUT, inst->as.output_count);
             da_append(p, &op);
         } break;
-        case BF_INPUT: {
+        case INST_INPUT: {
             Opcode op = opcode(OP_IN, 0);
             da_append(p, &op);
         } break;
-        case BF_LOOP: {
+        case INST_LOOP: {
             compile_loop(p, &inst->as.loop);
         } break;
         default: assert(0 && "UNREACHABLE: InstructionKind");
@@ -638,7 +642,7 @@ static const char *opcode_names[OP_MAX] = {
 };
 #endif
 
-static inline void move_ptr(Brainfuck *bf, ptrdiff_t diff)
+static inline void bf_move_ptr(Brainfuck *bf, ptrdiff_t diff)
 {
     bf->data_ptr += diff;
 
@@ -661,7 +665,7 @@ void run_program(Brainfuck *bf, Program p)
 
         switch (op->kind) {
         case OP_PTR: {
-            move_ptr(bf, (ptrdiff_t)op->arg);
+            bf_move_ptr(bf, (ptrdiff_t)op->arg);
             ip++;
         } break;
         case OP_DATA: {
@@ -698,14 +702,15 @@ void run_program(Brainfuck *bf, Program p)
             ip++;
         } break;
         case OP_MOVEADD: {
-            bf->tape[bf->data_ptr + (ptrdiff_t)op->arg] +=
-                bf->tape[bf->data_ptr];
+            int32_t offset = op->arg >> 32;
+            int32_t mul = (op->arg << 32) >> 32;
+            bf->tape[bf->data_ptr + offset] += bf->tape[bf->data_ptr] * mul;
             bf->tape[bf->data_ptr] = 0;
             ip++;
         } break;
         case OP_SCAN: {
             while (bf->tape[bf->data_ptr] != 0) {
-                move_ptr(bf, (ptrdiff_t)op->arg);
+                bf_move_ptr(bf, (ptrdiff_t)op->arg);
             }
             ip++;
         } break;
@@ -772,9 +777,9 @@ int main(int argc, char **argv)
 
 #ifdef TRACE_PROGRAM
     printf("Instructions tree:\n");
-    display_instructions_tree(p);
+    display_instructions_tree(insts);
     printf("\nSource reconstructed from instructions:\n");
-    display_instructions_source(p);
+    display_instructions_source(insts);
     printf("\n");
 #endif
 
