@@ -42,10 +42,6 @@
     fprintf(stderr,                                                            \
             "\nPROFILE: " #name " took %.3fms\n",                              \
             timer_elapsed(&_timer_##name))
-#else
-#define PROFILE_START(_name) (void)0
-#define PROFILE_END(_name) (void)(0)
-#endif
 
 static inline double timer_elapsed(struct timespec *t)
 {
@@ -56,6 +52,10 @@ static inline double timer_elapsed(struct timespec *t)
     ms += (double)(now.tv_nsec - t->tv_nsec) / 1e6;
     return ms;
 }
+#else
+#define PROFILE_START(_name) (void)0
+#define PROFILE_END(_name) (void)(0)
+#endif
 
 static MASON_Arena *arena;
 
@@ -212,35 +212,16 @@ Instruction *loop(size_t count, ...)
 void display_token(TokenKind kind)
 {
     switch (kind) {
-    case TOKEN_END:
-        printf("TOKEN_END\n");
-        break;
-    case TOKEN_RARROW:
-        printf("TOKEN_RARROW\n");
-        break;
-    case TOKEN_LARROW:
-        printf("TOKEN_LARROW\n");
-        break;
-    case TOKEN_PLUS:
-        printf("TOKEN_PLUS\n");
-        break;
-    case TOKEN_MINUS:
-        printf("TOKEN_MINUS\n");
-        break;
-    case TOKEN_DOT:
-        printf("TOKEN_DOT\n");
-        break;
-    case TOKEN_COMMA:
-        printf("TOKEN_COMMA\n");
-        break;
-    case TOKEN_OBRACKET:
-        printf("TOKEN_OBRACKET\n");
-        break;
-    case TOKEN_CBRACKET:
-        printf("TOKEN_CBRACKET\n");
-        break;
-    default:
-        assert(0 && "UNREACHABLE: TokenKind");
+    case TOKEN_END: printf("TOKEN_END\n"); break;
+    case TOKEN_RARROW: printf("TOKEN_RARROW\n"); break;
+    case TOKEN_LARROW: printf("TOKEN_LARROW\n"); break;
+    case TOKEN_PLUS: printf("TOKEN_PLUS\n"); break;
+    case TOKEN_MINUS: printf("TOKEN_MINUS\n"); break;
+    case TOKEN_DOT: printf("TOKEN_DOT\n"); break;
+    case TOKEN_COMMA: printf("TOKEN_COMMA\n"); break;
+    case TOKEN_OBRACKET: printf("TOKEN_OBRACKET\n"); break;
+    case TOKEN_CBRACKET: printf("TOKEN_CBRACKET\n"); break;
+    default: assert(0 && "UNREACHABLE: TokenKind");
     }
 }
 
@@ -268,9 +249,7 @@ void display_instruction(Instruction *inst)
             putchar('.');
         }
         break;
-    case BF_INPUT:
-        putchar(',');
-        break;
+    case BF_INPUT: putchar(','); break;
     case BF_LOOP:
         putchar('[');
         for (size_t i = 0; i < inst->as.loop.count; i++) {
@@ -278,8 +257,7 @@ void display_instruction(Instruction *inst)
         }
         putchar(']');
         break;
-    default:
-        assert(0 && "UNREACHABLE: InstructionKind");
+    default: assert(0 && "UNREACHABLE: InstructionKind");
     }
 }
 
@@ -303,20 +281,15 @@ void display_instruction_tree(Instruction *inst, size_t depth)
     case BF_CHANGE_DATA:
         printf("BF_CHANGE_DATA: %+d\n", inst->as.data_diff);
         break;
-    case BF_OUTPUT:
-        printf("BF_OUTPUT: %zu\n", inst->as.output_count);
-        break;
-    case BF_INPUT:
-        printf("BF_INPUT\n");
-        break;
+    case BF_OUTPUT: printf("BF_OUTPUT: %zu\n", inst->as.output_count); break;
+    case BF_INPUT: printf("BF_INPUT\n"); break;
     case BF_LOOP:
         printf("BF_LOOP:\n");
         for (size_t i = 0; i < inst->as.loop.count; i++) {
             display_instruction_tree(inst->as.loop.items[i], depth + 1);
         }
         break;
-    default:
-        assert(0 && "UNREACHABLE: InstructionKind");
+    default: assert(0 && "UNREACHABLE: InstructionKind");
     }
 }
 
@@ -363,16 +336,13 @@ void display_opcodes(Opcodes ops)
 
 char lexer_current_char(Lexer *l)
 {
-    if (l->cur.pos >= l->count)
-        return '\0';
-
+    if (l->cur.pos >= l->count) return '\0';
     return l->source[l->cur.pos];
 }
 
 char lexer_next_char(Lexer *l)
 {
-    if (l->cur.pos >= l->count)
-        return 0;
+    if (l->cur.pos >= l->count) return 0;
 
     char c = l->source[l->cur.pos++];
     if (c == '\n') {
@@ -398,34 +368,16 @@ bool lexer_next(Lexer *l)
         }
 
         switch (c) {
-        case '>':
-            l->token = TOKEN_RARROW;
-            return true;
-        case '<':
-            l->token = TOKEN_LARROW;
-            return true;
-        case '+':
-            l->token = TOKEN_PLUS;
-            return true;
-        case '-':
-            l->token = TOKEN_MINUS;
-            return true;
-        case '.':
-            l->token = TOKEN_DOT;
-            return true;
-        case ',':
-            l->token = TOKEN_COMMA;
-            return true;
-        case '[':
-            l->token = TOKEN_OBRACKET;
-            return true;
-        case ']':
-            l->token = TOKEN_CBRACKET;
-            return true;
-
-        default:
-            // Ignore unknown chars
-            break;
+        case '>': l->token = TOKEN_RARROW; return true;
+        case '<': l->token = TOKEN_LARROW; return true;
+        case '+': l->token = TOKEN_PLUS; return true;
+        case '-': l->token = TOKEN_MINUS; return true;
+        case '.': l->token = TOKEN_DOT; return true;
+        case ',': l->token = TOKEN_COMMA; return true;
+        case '[': l->token = TOKEN_OBRACKET; return true;
+        case ']': l->token = TOKEN_CBRACKET; return true;
+        // Ignore unknown chars
+        default: break;
         }
     }
 }
@@ -471,26 +423,25 @@ Program parse_program(Lexer *l, TokenKind stop_token)
 
         Instruction *inst;
         switch (l->token) {
-        case TOKEN_RARROW:
+        case TOKEN_RARROW: {
             inst = change_ptr(lexer_forward_count(l, TOKEN_RARROW) + 1);
-            break;
-        case TOKEN_LARROW:
+        } break;
+        case TOKEN_LARROW: {
             inst = change_ptr(-(lexer_forward_count(l, TOKEN_LARROW) + 1));
-            break;
-        case TOKEN_PLUS:
+        } break;
+        case TOKEN_PLUS: {
             inst = change_data(lexer_forward_count(l, TOKEN_PLUS) + 1);
-            break;
-        case TOKEN_MINUS:
+        } break;
+        case TOKEN_MINUS: {
             inst = change_data(-(lexer_forward_count(l, TOKEN_MINUS) + 1));
-            break;
+        } break;
         case TOKEN_DOT:
             inst = output(lexer_forward_count(l, TOKEN_DOT) + 1);
             break;
-        case TOKEN_COMMA:
+        case TOKEN_COMMA: {
             inst = input();
-            break;
-
-        case TOKEN_OBRACKET:
+        } break;
+        case TOKEN_OBRACKET: {
             Cursor bracket_cur = l->cur;
             Program body = parse_program(l, TOKEN_CBRACKET);
             if (l->token != TOKEN_CBRACKET) {
@@ -503,15 +454,14 @@ Program parse_program(Lexer *l, TokenKind stop_token)
                 return invalid_program();
             }
             inst = loop_from_program(body);
-            break;
-
-        case TOKEN_CBRACKET:
+        } break;
+        case TOKEN_CBRACKET: {
             fprintf(stderr,
                     "ERROR: Unmatched ']' at line %zu, column %zu\n",
                     l->cur.row + 1,
                     l->cur.pos - l->cur.bol);
             return invalid_program();
-
+        }
         default:
             fprintf(stderr,
                     "ERROR: Unexpected token at line %zu, column %zu: ",

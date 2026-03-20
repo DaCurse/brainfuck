@@ -9,3 +9,5 @@ BinPackArguments: false
 BinPackParameters: false
 BinPackLongBracedList: false
 AllowAllArgumentsOnNextLine: false
+AllowShortIfStatementsOnASingleLine: true
+AllowShortCaseLabelsOnASingleLine: true
