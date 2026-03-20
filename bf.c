@@ -17,23 +17,28 @@
 
 #define da_append_many(da, src, n)                                             \
     do {                                                                       \
-        size_t item_size = sizeof(*(da)->items);                               \
-        if ((da)->capacity - (da)->count < (n)) {                              \
-            size_t new_capacity = (da)->capacity == 0 ? DA_INITIAL_CAPACITY    \
-                                                      : (da)->capacity * 2;    \
-            while (new_capacity < (da)->count + (n)) {                         \
+        auto _da = (da);                                                       \
+        auto _src = (src);                                                     \
+        size_t _n = (n);                                                       \
+        size_t item_size = sizeof(*_da->items);                                \
+        if (_da->capacity - _da->count < _n) {                                 \
+            size_t new_capacity =                                              \
+                _da->capacity == 0 ? DA_INITIAL_CAPACITY : _da->capacity * 2;  \
+            while (new_capacity < _da->count + _n) {                           \
                 new_capacity *= 2;                                             \
             }                                                                  \
-            (da)->items = mason_arena_realloc(arena,                           \
-                                              (da)->items,                     \
-                                              (da)->capacity * item_size,      \
-                                              new_capacity * item_size);       \
-            assert((da)->items != NULL);                                       \
-            (da)->capacity = new_capacity;                                     \
+            _da->items = mason_arena_realloc(arena,                            \
+                                             _da->items,                       \
+                                             _da->capacity * item_size,        \
+                                             new_capacity * item_size);        \
+            assert(_da->items != NULL);                                        \
+            _da->capacity = new_capacity;                                      \
         }                                                                      \
-        memcpy((da)->items + (da)->count, (src), (n) * item_size);             \
-        (da)->count += (n);                                                    \
-    } while (0);
+        memcpy(_da->items + _da->count, _src, _n * item_size);                 \
+        _da->count += _n;                                                      \
+    } while (0)
+
+#define da_append(da, src) da_append_many(da, src, 1)
 
 #ifdef PROFILE
 #define PROFILE_START(name)                                                    \
@@ -87,7 +92,7 @@ typedef struct {
     Instruction **items;
     size_t count;
     size_t capacity;
-} Program;
+} Instructions;
 
 struct Instruction {
     InstructionKind kind;
@@ -95,7 +100,7 @@ struct Instruction {
         ptrdiff_t ptr_diff;
         int32_t data_diff;
         size_t output_count;
-        Program loop;
+        Instructions loop;
     } as;
 };
 
@@ -141,7 +146,7 @@ typedef struct {
     Opcode *items;
     size_t count;
     size_t capacity;
-} Opcodes;
+} Program;
 
 #ifdef BF_BIGNUM16
 typedef uint16_t Cell;
@@ -188,29 +193,11 @@ Instruction *input()
     return inst;
 }
 
-Instruction *loop_from_program(Program body)
+Instruction *loop(Instructions body)
 {
     Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
     inst->kind = BF_LOOP;
     inst->as.loop = body;
-    return inst;
-}
-
-Instruction *loop(size_t count, ...)
-{
-    va_list args;
-    va_start(args, count);
-
-    Program p = {0};
-    for (size_t i = 0; i < count; i++) {
-        Instruction *inst = va_arg(args, Instruction *);
-        da_append_many(&p, &inst, 1);
-    }
-    va_end(args);
-
-    Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = BF_LOOP;
-    inst->as.loop = p;
     return inst;
 }
 
@@ -230,7 +217,7 @@ void display_token(TokenKind kind)
     }
 }
 
-void display_instruction(Instruction *inst)
+void display_instruction_source(Instruction *inst)
 {
     switch (inst->kind) {
     case BF_CHANGE_PTR: {
@@ -258,7 +245,7 @@ void display_instruction(Instruction *inst)
     case BF_LOOP:
         putchar('[');
         for (size_t i = 0; i < inst->as.loop.count; i++) {
-            display_instruction(inst->as.loop.items[i]);
+            display_instruction_source(inst->as.loop.items[i]);
         }
         putchar(']');
         break;
@@ -266,10 +253,10 @@ void display_instruction(Instruction *inst)
     }
 }
 
-void display_program(Program p)
+void display_instructions_source(Instructions insts)
 {
-    for (size_t i = 0; i < p.count; i++) {
-        display_instruction(p.items[i]);
+    for (size_t i = 0; i < insts.count; i++) {
+        display_instruction_source(insts.items[i]);
     }
 }
 
@@ -298,10 +285,10 @@ void display_instruction_tree(Instruction *inst, size_t depth)
     }
 }
 
-void display_program_tree(Program p)
+void display_instructions_tree(Instructions insts)
 {
-    for (size_t i = 0; i < p.count; i++) {
-        display_instruction_tree(p.items[i], 1);
+    for (size_t i = 0; i < insts.count; i++) {
+        display_instruction_tree(insts.items[i], 1);
     }
 }
 
@@ -320,11 +307,11 @@ void display_opcode(Opcode op)
     }
 }
 
-void display_opcodes(Opcodes ops)
+void display_program(Program p)
 {
-    for (size_t i = 0; i < ops.count; i++) {
+    for (size_t i = 0; i < p.count; i++) {
         printf("    %zu ", i);
-        display_opcode(ops.items[i]);
+        display_opcode(p.items[i]);
     }
 }
 
@@ -398,21 +385,21 @@ size_t lexer_forward_count(Lexer *l, TokenKind expected)
     return count;
 }
 
-Program invalid_program() { return (Program){.valid = false}; }
-Program empty_program() { return (Program){.valid = true}; }
+Instructions invalid_instructions() { return (Instructions){.valid = false}; }
+Instructions empty_instructions() { return (Instructions){.valid = true}; }
 
-Program parse_program(Lexer *l, TokenKind stop_token)
+Instructions parse_instructions(Lexer *l, TokenKind stop_token)
 {
-    Program p = empty_program();
+    Instructions insts = empty_instructions();
 
     while (true) {
         if (!lexer_next(l)) {
-            p.valid = stop_token == TOKEN_END;
-            return p;
+            insts.valid = stop_token == TOKEN_END;
+            return insts;
         }
 
         if (l->token == stop_token) {
-            return p;
+            return insts;
         }
 
         Instruction *inst;
@@ -437,7 +424,7 @@ Program parse_program(Lexer *l, TokenKind stop_token)
         } break;
         case TOKEN_OBRACKET: {
             Cursor bracket_cur = l->cur;
-            Program body = parse_program(l, TOKEN_CBRACKET);
+            Instructions body = parse_instructions(l, TOKEN_CBRACKET);
             if (l->token != TOKEN_CBRACKET) {
                 fprintf(stderr,
                         "ERROR: Unmatched '[' at line %zu, column %zu: "
@@ -445,16 +432,16 @@ Program parse_program(Lexer *l, TokenKind stop_token)
                         bracket_cur.row + 1,
                         bracket_cur.pos - bracket_cur.bol);
                 display_token(l->token);
-                return invalid_program();
+                return invalid_instructions();
             }
-            inst = loop_from_program(body);
+            inst = loop(body);
         } break;
         case TOKEN_CBRACKET: {
             fprintf(stderr,
                     "ERROR: Unmatched ']' at line %zu, column %zu\n",
                     l->cur.row + 1,
                     l->cur.pos - l->cur.bol);
-            return invalid_program();
+            return invalid_instructions();
         }
         default:
             fprintf(stderr,
@@ -462,10 +449,10 @@ Program parse_program(Lexer *l, TokenKind stop_token)
                     l->cur.row + 1,
                     l->cur.pos - l->cur.bol);
             display_token(l->token);
-            return invalid_program();
+            return invalid_instructions();
         }
 
-        da_append_many(&p, &inst, 1);
+        da_append(&insts, &inst);
     }
 }
 
@@ -474,24 +461,24 @@ Opcode opcode(OpcodeKind kind, int64_t arg)
     return (Opcode){.kind = kind, .arg = arg};
 }
 
-void compile_program_into(Opcodes *ops, Program *p);
+void compile_instructions_into(Program *p, Instructions *insts);
 
-bool is_clear(Program *loop)
+bool is_clear(Instructions *body)
 {
     // Pattern: [-] or [+]
-    return loop->count == 1 && loop->items[0]->kind == BF_CHANGE_DATA &&
-           (loop->items[0]->as.data_diff == -1 ||
-            loop->items[0]->as.data_diff == 1);
+    return body->count == 1 && body->items[0]->kind == BF_CHANGE_DATA &&
+           (body->items[0]->as.data_diff == -1 ||
+            body->items[0]->as.data_diff == 1);
 }
 
-bool is_moveadd(Program *loop, ptrdiff_t *out_offset)
+bool is_moveadd(Instructions *body, ptrdiff_t *out_offset)
 {
     // Matches any pattern like so:
     // [->+<] or [>+<-] - With any balanced number of > and < or < and > for
     // negative offset.
 
     // Always 4 instructions because we compress repeated instructions
-    if (loop->count != 4) {
+    if (body->count != 4) {
         return false;
     }
 
@@ -502,8 +489,8 @@ bool is_moveadd(Program *loop, ptrdiff_t *out_offset)
     bool saw_decrement = false;
     bool saw_increment = false;
 
-    for (size_t i = 0; i < loop->count; i++) {
-        Instruction *inst = loop->items[i];
+    for (size_t i = 0; i < body->count; i++) {
+        Instruction *inst = body->items[i];
 
         switch (inst->kind) {
         case BF_CHANGE_PTR: {
@@ -536,74 +523,74 @@ bool is_moveadd(Program *loop, ptrdiff_t *out_offset)
     return true;
 }
 
-void compile_loop(Opcodes *ops, Program *loop)
+void compile_loop(Program *p, Instructions *body)
 {
-    if (is_clear(loop)) {
+    if (is_clear(body)) {
         Opcode op_clear = opcode(OP_CLR, 0);
-        da_append_many(ops, &op_clear, 1);
+        da_append(p, &op_clear);
         return;
     }
 
     ptrdiff_t moveadd_offset;
-    if (is_moveadd(loop, &moveadd_offset)) {
+    if (is_moveadd(body, &moveadd_offset)) {
         Opcode op_moveadd = opcode(OP_MOVEADD, moveadd_offset);
-        da_append_many(ops, &op_moveadd, 1);
+        da_append(p, &op_moveadd);
         return;
     }
 
     // Simple comment loop optimization (don't emit loop if it's the first
     // instruction of the program)
-    if (ops->count > 0) {
-        size_t jz_pos = ops->count;
+    if (p->count > 0) {
+        size_t jz_pos = p->count;
         Opcode op_loop_start = opcode(OP_JZ, 0);
-        da_append_many(ops, &op_loop_start, 1);
+        da_append(p, &op_loop_start);
 
-        compile_program_into(ops, loop);
+        compile_instructions_into(p, body);
 
-        size_t jnz_pos = ops->count;
+        size_t jnz_pos = p->count;
         Opcode op_loop_end = opcode(OP_JNZ, (int64_t)(jz_pos + 1));
-        da_append_many(ops, &op_loop_end, 1);
+        da_append(p, &op_loop_end);
 
         // Set JZ address after recursively expanding the loop
-        ops->items[jz_pos].arg = (int64_t)(jnz_pos + 1);
+        p->items[jz_pos].arg = (int64_t)(jnz_pos + 1);
     }
 }
 
-void compile_program_into(Opcodes *ops, Program *p)
+void compile_instructions_into(Program *p, Instructions *insts)
 {
-    for (size_t i = 0; i < p->count; i++) {
-        Instruction *inst = p->items[i];
+    for (size_t i = 0; i < insts->count; i++) {
+        Instruction *inst = insts->items[i];
 
         switch (inst->kind) {
         case BF_CHANGE_PTR: {
             Opcode op = opcode(OP_PTR, inst->as.ptr_diff);
-            da_append_many(ops, &op, 1);
+            da_append(p, &op);
         } break;
         case BF_CHANGE_DATA: {
             Opcode op = opcode(OP_DATA, inst->as.data_diff);
-            da_append_many(ops, &op, 1);
+            da_append(p, &op);
         } break;
         case BF_OUTPUT: {
             Opcode op = opcode(OP_OUT, inst->as.output_count);
-            da_append_many(ops, &op, 1);
+            da_append(p, &op);
         } break;
         case BF_INPUT: {
             Opcode op = opcode(OP_IN, 0);
-            da_append_many(ops, &op, 1);
+            da_append(p, &op);
         } break;
         case BF_LOOP: {
-            compile_loop(ops, &inst->as.loop);
+            compile_loop(p, &inst->as.loop);
         } break;
         default: assert(0 && "UNREACHABLE: InstructionKind");
         }
     }
 }
 
-Opcodes compile_program(Program p)
+Program compile_program(Instructions insts)
 {
-    Opcodes ops = {0};
-    compile_program_into(&ops, &p);
-    return ops;
+    Program p = {0};
+    compile_instructions_into(&p, &insts);
+    return p;
 }
 
 #ifdef PROFILE
@@ -620,12 +607,11 @@ static const char *opcode_names[OP_MAX] = {
 };
 #endif
 
-void run_program(Brainfuck *bf, Opcodes ops)
+void run_program(Brainfuck *bf, Program p)
 {
     size_t ip = 0;
-
-    while (ip < ops.count) {
-        Opcode *op = &ops.items[ip];
+    while (ip < p.count) {
+        Opcode *op = &p.items[ip];
 
 #ifdef PROFILE
         opcode_counts[op->kind]++;
@@ -726,35 +712,35 @@ int main(int argc, char **argv)
         .source = buf.items,
         .count = buf.count,
     };
+    PROFILE_START(parse_instructions);
+    Instructions insts = parse_instructions(&l, TOKEN_END);
+    PROFILE_END(parse_instructions);
 
-    PROFILE_START(parse_program);
-    Program p = parse_program(&l, TOKEN_END);
-    PROFILE_END(parse_program);
-
-    if (!p.valid) {
+    if (!insts.valid) {
         fprintf(stderr, "ERROR: Invalid program\n");
         mason_arena_destroy(arena);
         return 1;
     }
 
-    if (p.count == 0) {
+    if (insts.count == 0) {
         fprintf(stderr, "NOTE: Empty program\n");
     }
 
 #ifdef TRACE_PROGRAM
-    printf("Program tree:\n");
-    display_program_tree(p);
-    printf("\nProgram reconstructed from tree:\n");
-    display_program(p);
+    printf("Instructions tree:\n");
+    display_instructions_tree(p);
+    printf("\nSource reconstructed from instructions:\n");
+    display_instructions_source(p);
+    printf("\n");
 #endif
 
     PROFILE_START(compile_program);
-    Opcodes ops = compile_program(p);
+    Program p = compile_program(insts);
     PROFILE_END(compile_program);
 
 #ifdef TRACE_PROGRAM
     printf("\nOpcodes:\n");
-    display_opcodes(ops);
+    display_program(p);
     printf("\n\nOutput:\n");
 #endif
 
@@ -762,9 +748,8 @@ int main(int argc, char **argv)
         .tape = mason_arena_calloc(arena, TAPE_SIZE, sizeof(*bf.tape)),
         .tape_size = TAPE_SIZE,
     };
-
     PROFILE_START(run_program);
-    run_program(&bf, ops);
+    run_program(&bf, p);
     PROFILE_END(run_program);
 
 #ifdef PROFILE
