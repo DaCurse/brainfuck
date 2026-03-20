@@ -300,6 +300,16 @@ void display_instructions_tree(Instructions insts)
     }
 }
 
+static inline void unpack_i64(int64_t val, int32_t *out_a, int32_t *out_b) {
+    *out_a = (int32_t)(val >> 32);
+    *out_b = (int32_t)(val & 0xFFFFFFFF); 
+}
+
+static inline int64_t pack_i64(int32_t a, int32_t b)
+{
+    return ((int64_t)a << 32) | (int64_t)(uint32_t)b;
+}
+
 void display_opcode(Opcode op)
 {
     switch (op.kind) {
@@ -311,8 +321,8 @@ void display_opcode(Opcode op)
     case OP_JNZ: printf("JNZ %" PRId64 "\n", op.arg); break;
     case OP_CLR: printf("CLR\n"); break;
     case OP_MOVEADD: {
-        int32_t offset = op.arg >> 32;
-        int32_t mul = (op.arg << 32) >> 32;
+        int32_t offset, mul;
+        unpack_i64(op.arg, &offset, &mul);
         printf("MOVEADD %+d, %+d\n", offset, mul);
     } break;
     case OP_SCAN: printf("SCAN %+" PRId64 "\n", op.arg); break;
@@ -538,7 +548,7 @@ Opcode detect_moveadd(Instructions *body)
     }
 
     // Pack offset and multiplier into arg
-    int64_t arg = ((int64_t)offset << 32) + mul;
+    int64_t arg = pack_i64(offset, mul);
     return opcode(OP_MOVEADD, arg);
 }
 
@@ -702,8 +712,8 @@ void run_program(Brainfuck *bf, Program p)
             ip++;
         } break;
         case OP_MOVEADD: {
-            int32_t offset = op->arg >> 32;
-            int32_t mul = (op->arg << 32) >> 32;
+            int32_t offset, mul;
+            unpack_i64(op->arg, &offset, &mul);
             bf->tape[bf->data_ptr + offset] += bf->tape[bf->data_ptr] * mul;
             bf->tape[bf->data_ptr] = 0;
             ip++;

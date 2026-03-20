@@ -1,15 +1,34 @@
 # Brainfuck
 
-Brainfuck interpreter in C
+Semi-optimizing Brainfuck interpreter in C
 
 Converts BF into a more compact instruction AST, then compiles the AST to a linear bytecode before interpreting it.
 
-Has some optimization opcodes:
+## Instruction Set
 
-* `OP_CLR` - Set current cell to 0.
-* `OP_MOVEADD` - Add value from current cell to a cell at offset `arg` and set current
-    cell to 0.
-* `OP_SCAN`- Move cells right or left in steps of `arg` until you find a cell that contains 0.
+```asm
+; Move pointer
+PTR     i64         ; step
+; Change current cell
+DATA    i64         ; delta
+; Output character from current cell
+OUT     i64         ; repeat count
+; Input character into current cell
+IN                  ; no operands
+; Jump to address if current cell is 0
+JZ      i64         ; absolute target
+; Jump to address if current cell is not 0
+JNZ     i64         ; absolute target
+
+; The instructions below are optimizations of common patterns
+
+; Set current cell to 0
+CLR                 ; no operands
+; Add value of current cell * multiplier to cell at offset, and set current cell to 0 
+MOVEADD i32, i32    ; offset, multiplier
+; Move pointer in fixed steps until 0 is encountered
+SCAN    i64         ; step
+```
 
 ## Build
 
