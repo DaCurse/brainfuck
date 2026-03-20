@@ -125,6 +125,8 @@ typedef enum {
     OP_IN,
     OP_JZ,
     OP_JNZ,
+    OP_CLR,
+    OP_MOVEADD,
 } OpcodeKind;
 
 typedef struct {
@@ -303,26 +305,15 @@ void display_program_tree(Program p)
 void display_opcode(Opcode op)
 {
     switch (op.kind) {
-    case OP_DATA:
-        printf("DATA %+lld\n", op.arg);
-        break;
-    case OP_PTR:
-        printf("PTR %+lld\n", op.arg);
-        break;
-    case OP_OUT:
-        printf("OUT %lld\n", op.arg);
-        break;
-    case OP_IN:
-        printf("IN\n");
-        break;
-    case OP_JZ:
-        printf("JZ %lld\n", op.arg);
-        break;
-    case OP_JNZ:
-        printf("JNZ %lld\n", op.arg);
-        break;
-    default:
-        assert(0 && "UNREACHABLE: OpcodeKind");
+    case OP_DATA: printf("DATA %+lld\n", op.arg); break;
+    case OP_PTR: printf("PTR %+lld\n", op.arg); break;
+    case OP_OUT: printf("OUT %lld\n", op.arg); break;
+    case OP_IN: printf("IN\n"); break;
+    case OP_JZ: printf("JZ %lld\n", op.arg); break;
+    case OP_JNZ: printf("JNZ %lld\n", op.arg); break;
+    case OP_CLR: printf("CLR\n"); break;
+    case OP_MOVEADD: printf("MOVEADD %+lld\n", op.arg); break;
+    default: assert(0 && "UNREACHABLE: OpcodeKind");
     }
 }
 
@@ -480,10 +471,105 @@ Opcode opcode(OpcodeKind kind, int64_t arg)
     return (Opcode){.kind = kind, .arg = arg};
 }
 
-void compile_program_into(Opcodes *ops, Program p)
+void compile_program_into(Opcodes *ops, Program *p);
+
+bool is_clear(Program *loop)
 {
-    for (size_t i = 0; i < p.count; i++) {
-        Instruction *inst = p.items[i];
+    // Pattern: [-] or [+]
+    return loop->count == 1 && loop->items[0]->kind == BF_CHANGE_DATA &&
+           (loop->items[0]->as.data_diff == -1 ||
+            loop->items[0]->as.data_diff == 1);
+}
+
+bool is_moveadd(Program *loop, ptrdiff_t *out_offset)
+{
+    // Matches any pattern like so:
+    // [->+<] or [>+<-] - With any balanced number of > and < or < and > for
+    // negative offset.
+
+    // Always 4 instructions because we compress repeated instructions
+    if (loop->count != 4) {
+        return false;
+    }
+
+    // ptr tracks our current position relative to the origin cell.
+    // it must return to 0 by the end, meaning the ptr moves are balanced.
+    ptrdiff_t ptr = 0;
+    ptrdiff_t offset = 0;
+    bool saw_decrement = false;
+    bool saw_increment = false;
+
+    for (size_t i = 0; i < loop->count; i++) {
+        Instruction *inst = loop->items[i];
+
+        switch (inst->kind) {
+        case BF_CHANGE_PTR: {
+            ptr += inst->as.ptr_diff;
+        } break;
+        case BF_CHANGE_DATA: {
+            if (ptr == 0) {
+                // we're on the origin cell, must be the loop counter decrement
+                if (inst->as.data_diff != -1) return false;
+                if (saw_decrement) return false;
+                saw_decrement = true;
+            } else {
+                // we're on the target cell, must be a single increment
+                if (inst->as.data_diff != 1) return false;
+                if (saw_increment) return false;
+                saw_increment = true;
+                // record the target cell's offset
+                offset = ptr;
+            }
+        } break;
+        default: return false;
+        }
+    }
+
+    if (!saw_decrement || !saw_increment || ptr != 0) {
+        return false;
+    }
+
+    *out_offset = offset;
+    return true;
+}
+
+void compile_loop(Opcodes *ops, Program *loop)
+{
+    if (is_clear(loop)) {
+        Opcode op_clear = opcode(OP_CLR, 0);
+        da_append_many(ops, &op_clear, 1);
+        return;
+    }
+
+    ptrdiff_t moveadd_offset;
+    if (is_moveadd(loop, &moveadd_offset)) {
+        Opcode op_moveadd = opcode(OP_MOVEADD, moveadd_offset);
+        da_append_many(ops, &op_moveadd, 1);
+        return;
+    }
+
+    // Simple comment loop optimization (don't emit loop if it's the first
+    // instruction of the program)
+    if (ops->count > 0) {
+        size_t jz_pos = ops->count;
+        Opcode op_loop_start = opcode(OP_JZ, 0);
+        da_append_many(ops, &op_loop_start, 1);
+
+        compile_program_into(ops, loop);
+
+        size_t jnz_pos = ops->count;
+        Opcode op_loop_end = opcode(OP_JNZ, (int64_t)(jz_pos + 1));
+        da_append_many(ops, &op_loop_end, 1);
+
+        // Set JZ address after recursively expanding the loop
+        ops->items[jz_pos].arg = (int64_t)(jnz_pos + 1);
+    }
+}
+
+void compile_program_into(Opcodes *ops, Program *p)
+{
+    for (size_t i = 0; i < p->count; i++) {
+        Instruction *inst = p->items[i];
 
         switch (inst->kind) {
         case BF_CHANGE_PTR: {
@@ -503,21 +589,9 @@ void compile_program_into(Opcodes *ops, Program p)
             da_append_many(ops, &op, 1);
         } break;
         case BF_LOOP: {
-            size_t jz_pos = ops->count;
-            Opcode op_loop_start = opcode(OP_JZ, 0);
-            da_append_many(ops, &op_loop_start, 1);
-
-            compile_program_into(ops, inst->as.loop);
-
-            size_t jnz_pos = ops->count;
-            Opcode op_loop_end = opcode(OP_JNZ, (int64_t)(jz_pos + 1));
-            da_append_many(ops, &op_loop_end, 1);
-
-            // Set JZ address after recursively expanding the loop
-            ops->items[jz_pos].arg = (int64_t)(jnz_pos + 1);
+            compile_loop(ops, &inst->as.loop);
         } break;
-        default:
-            assert(0 && "UNREACHABLE: InstructionKind");
+        default: assert(0 && "UNREACHABLE: InstructionKind");
         }
     }
 }
@@ -525,7 +599,7 @@ void compile_program_into(Opcodes *ops, Program p)
 Opcodes compile_program(Program p)
 {
     Opcodes ops = {0};
-    compile_program_into(&ops, p);
+    compile_program_into(&ops, &p);
     return ops;
 }
 
@@ -577,8 +651,17 @@ void run_program(Brainfuck *bf, Opcodes ops)
                 ip++;
             }
         } break;
-        default:
-            assert(0 && "UNREACHABLE: OpcodeKind");
+        case OP_CLR: {
+            bf->tape[bf->data_ptr] = 0;
+            ip++;
+        } break;
+        case OP_MOVEADD: {
+            bf->tape[bf->data_ptr + (ptrdiff_t)op->arg] +=
+                bf->tape[bf->data_ptr];
+            bf->tape[bf->data_ptr] = 0;
+            ip++;
+        } break;
+        default: assert(0 && "UNREACHABLE: OpcodeKind");
         }
     }
 }
