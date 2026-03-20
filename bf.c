@@ -300,14 +300,15 @@ void display_instructions_tree(Instructions insts)
     }
 }
 
-static inline void unpack_i64(int64_t val, int32_t *out_a, int32_t *out_b) {
+static inline void unpack_i64(int64_t val, int32_t *out_a, int32_t *out_b)
+{
     *out_a = (int32_t)(val >> 32);
-    *out_b = (int32_t)(val & 0xFFFFFFFF); 
+    *out_b = (int32_t)(val & 0xFFFFFFFF);
 }
 
 static inline int64_t pack_i64(int32_t a, int32_t b)
 {
-    return ((int64_t)a << 32) | (int64_t)(uint32_t)b;
+    return (int64_t)(((uint64_t)(uint32_t)a << 32) | (uint32_t)b);
 }
 
 void display_opcode(Opcode op)
