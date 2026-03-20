@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -127,6 +128,8 @@ typedef enum {
     OP_JNZ,
     OP_CLR,
     OP_MOVEADD,
+
+    OP_MAX
 } OpcodeKind;
 
 typedef struct {
@@ -305,14 +308,14 @@ void display_program_tree(Program p)
 void display_opcode(Opcode op)
 {
     switch (op.kind) {
-    case OP_DATA: printf("DATA %+lld\n", op.arg); break;
-    case OP_PTR: printf("PTR %+lld\n", op.arg); break;
-    case OP_OUT: printf("OUT %lld\n", op.arg); break;
+    case OP_DATA: printf("DATA %+" PRId64 "\n", op.arg); break;
+    case OP_PTR: printf("PTR %+" PRId64 "\n", op.arg); break;
+    case OP_OUT: printf("OUT %" PRId64 "\n", op.arg); break;
     case OP_IN: printf("IN\n"); break;
-    case OP_JZ: printf("JZ %lld\n", op.arg); break;
-    case OP_JNZ: printf("JNZ %lld\n", op.arg); break;
+    case OP_JZ: printf("JZ %" PRId64 "\n", op.arg); break;
+    case OP_JNZ: printf("JNZ %" PRId64 "\n", op.arg); break;
     case OP_CLR: printf("CLR\n"); break;
-    case OP_MOVEADD: printf("MOVEADD %+lld\n", op.arg); break;
+    case OP_MOVEADD: printf("MOVEADD %+" PRId64 "\n", op.arg); break;
     default: assert(0 && "UNREACHABLE: OpcodeKind");
     }
 }
@@ -320,7 +323,7 @@ void display_opcode(Opcode op)
 void display_opcodes(Opcodes ops)
 {
     for (size_t i = 0; i < ops.count; i++) {
-        printf("    %08lld ", i);
+        printf("    %zu ", i);
         display_opcode(ops.items[i]);
     }
 }
@@ -603,12 +606,30 @@ Opcodes compile_program(Program p)
     return ops;
 }
 
+#ifdef PROFILE
+static size_t opcode_counts[OP_MAX] = {0};
+static const char *opcode_names[OP_MAX] = {
+    "OP_PTR",
+    "OP_DATA",
+    "OP_OUT",
+    "OP_IN",
+    "OP_JZ",
+    "OP_JNZ",
+    "OP_CLR",
+    "OP_MOVEADD",
+};
+#endif
+
 void run_program(Brainfuck *bf, Opcodes ops)
 {
     size_t ip = 0;
 
     while (ip < ops.count) {
         Opcode *op = &ops.items[ip];
+
+#ifdef PROFILE
+        opcode_counts[op->kind]++;
+#endif
 
         switch (op->kind) {
         case OP_PTR: {
@@ -745,6 +766,16 @@ int main(int argc, char **argv)
     PROFILE_START(run_program);
     run_program(&bf, ops);
     PROFILE_END(run_program);
+
+#ifdef PROFILE
+    fprintf(stderr, "\nOpcode counts:\n");
+    size_t total = 0;
+    for (size_t i = 0; i < OP_MAX; i++) {
+        printf("    %s: %zu\n", opcode_names[i], opcode_counts[i]);
+        total += opcode_counts[i];
+    }
+    printf("Total: %zu\n", total);
+#endif
 
     mason_arena_destroy(arena);
     return 0;
