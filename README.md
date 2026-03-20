@@ -4,6 +4,19 @@ Brainfuck interpreter in C
 
 Converts BF into a more compact instruction AST, then compiles the AST to a linear bytecode before interpreting it.
 
+Has some optimization opcodes:
+
+```c
+/* Set current cell to 0 */
+OP_CLR,
+/* Add value from current cell to a cell at offset `arg` and set current
+    cell to 0*/
+OP_MOVEADD,
+/* Move cells right or left in steps of `arg` until you find a cell that
+    contains 0 */
+OP_SCAN,
+```
+
 ## Build
 
 ```bash
@@ -23,6 +36,9 @@ make bf_opt
 ./bf examples/helloworld.b
 ./bf examples/rot13.b
 ./bf_opt examples/bitwidth.b
-# helloworld_compact.b is specifically made to be fed into brainfuck in brainfuck 
-cat examples/helloworld_compact.b | ./bf_opt examples/brainfuck.b
+./bf_opt examples/mandel.b
+# Examples ending in ! can be run through dbfi, a brainfuck in brainfuck interpreter
+cat examples/helloworld_compact.b | ./bf_opt examples/dbfi.b
+cat examples/twinkle.b | ./bf_opt examples/dbfi.b
+cat examples/quine.b | ./bf_opt examples/dbfi.b
 ```

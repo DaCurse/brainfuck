@@ -125,14 +125,25 @@ typedef struct {
 } Lexer;
 
 typedef enum {
+    OP_INVALID,
+
+    // Default bf opcodes
     OP_PTR,
     OP_DATA,
     OP_OUT,
     OP_IN,
     OP_JZ,
     OP_JNZ,
+
+    // Optimizations
+    /* Set current cell to 0 */
     OP_CLR,
+    /* Add value from current cell to a cell at offset `arg` and set current
+       cell to 0*/
     OP_MOVEADD,
+    /* Move cells right or left in steps of `arg` until you find a cell that
+       contains 0 */
+    OP_SCAN,
 
     OP_MAX
 } OpcodeKind;
@@ -303,6 +314,7 @@ void display_opcode(Opcode op)
     case OP_JNZ: printf("JNZ %" PRId64 "\n", op.arg); break;
     case OP_CLR: printf("CLR\n"); break;
     case OP_MOVEADD: printf("MOVEADD %+" PRId64 "\n", op.arg); break;
+    case OP_SCAN: printf("SCAN %+" PRId64 "\n", op.arg); break;
     default: assert(0 && "UNREACHABLE: OpcodeKind");
     }
 }
@@ -463,15 +475,19 @@ Opcode opcode(OpcodeKind kind, int64_t arg)
 
 void compile_instructions_into(Program *p, Instructions *insts);
 
-bool is_clear(Instructions *body)
+Opcode detect_clear(Instructions *body)
 {
     // Pattern: [-] or [+]
-    return body->count == 1 && body->items[0]->kind == BF_CHANGE_DATA &&
-           (body->items[0]->as.data_diff == -1 ||
-            body->items[0]->as.data_diff == 1);
+    if (body->count == 1 && body->items[0]->kind == BF_CHANGE_DATA &&
+        (body->items[0]->as.data_diff == -1 ||
+         body->items[0]->as.data_diff == 1)) {
+        return opcode(OP_CLR, 0);
+    }
+
+    return opcode(OP_INVALID, 0);
 }
 
-bool is_moveadd(Instructions *body, ptrdiff_t *out_offset)
+Opcode detect_moveadd(Instructions *body)
 {
     // Matches any pattern like so:
     // [->+<] or [>+<-] - With any balanced number of > and < or < and > for
@@ -479,7 +495,7 @@ bool is_moveadd(Instructions *body, ptrdiff_t *out_offset)
 
     // Always 4 instructions because we compress repeated instructions
     if (body->count != 4) {
-        return false;
+        return opcode(OP_INVALID, 0);
     }
 
     // ptr tracks our current position relative to the origin cell.
@@ -499,43 +515,56 @@ bool is_moveadd(Instructions *body, ptrdiff_t *out_offset)
         case BF_CHANGE_DATA: {
             if (ptr == 0) {
                 // we're on the origin cell, must be the loop counter decrement
-                if (inst->as.data_diff != -1) return false;
-                if (saw_decrement) return false;
+                if (inst->as.data_diff != -1) return opcode(OP_INVALID, 0);
+                if (saw_decrement) return opcode(OP_INVALID, 0);
                 saw_decrement = true;
             } else {
                 // we're on the target cell, must be a single increment
-                if (inst->as.data_diff != 1) return false;
-                if (saw_increment) return false;
+                if (inst->as.data_diff != 1) return opcode(OP_INVALID, 0);
+                if (saw_increment) return opcode(OP_INVALID, 0);
                 saw_increment = true;
                 // record the target cell's offset
                 offset = ptr;
             }
         } break;
-        default: return false;
+        default: return opcode(OP_INVALID, 0);
         }
     }
 
     if (!saw_decrement || !saw_increment || ptr != 0) {
-        return false;
+        return opcode(OP_INVALID, 0);
     }
 
-    *out_offset = offset;
-    return true;
+    return opcode(OP_MOVEADD, offset);
 }
+
+Opcode detect_scan(Instructions *body)
+{
+    // Detects patterns like [>] or [<] with any amount of < or > inside
+    if (body->count == 1 && body->items[0]->kind == BF_CHANGE_PTR) {
+        return opcode(OP_SCAN, body->items[0]->as.ptr_diff);
+    }
+
+    return opcode(OP_INVALID, 0);
+}
+
+typedef Opcode (*OptimizationDetector)(Instructions *body);
 
 void compile_loop(Program *p, Instructions *body)
 {
-    if (is_clear(body)) {
-        Opcode op_clear = opcode(OP_CLR, 0);
-        da_append(p, &op_clear);
-        return;
-    }
+    static const OptimizationDetector detectors[] = {
+        detect_clear,
+        detect_moveadd,
+        detect_scan,
+        NULL,
+    };
 
-    ptrdiff_t moveadd_offset;
-    if (is_moveadd(body, &moveadd_offset)) {
-        Opcode op_moveadd = opcode(OP_MOVEADD, moveadd_offset);
-        da_append(p, &op_moveadd);
-        return;
+    for (size_t i = 0; detectors[i] != NULL; i++) {
+        Opcode op = detectors[i](body);
+        if (op.kind != OP_INVALID) {
+            da_append(p, &op);
+            return;
+        }
     }
 
     // Simple comment loop optimization (don't emit loop if it's the first
@@ -596,6 +625,7 @@ Program compile_program(Instructions insts)
 #ifdef PROFILE
 static size_t opcode_counts[OP_MAX] = {0};
 static const char *opcode_names[OP_MAX] = {
+    "OP_INVALID",
     "OP_PTR",
     "OP_DATA",
     "OP_OUT",
@@ -604,8 +634,20 @@ static const char *opcode_names[OP_MAX] = {
     "OP_JNZ",
     "OP_CLR",
     "OP_MOVEADD",
+    "OP_SCAN",
 };
 #endif
+
+static inline void move_ptr(Brainfuck *bf, ptrdiff_t diff)
+{
+    bf->data_ptr += diff;
+
+    if (bf->data_ptr < 0) {
+        bf->data_ptr += bf->tape_size;
+    } else if (bf->data_ptr >= (ptrdiff_t)bf->tape_size) {
+        bf->data_ptr -= bf->tape_size;
+    }
+}
 
 void run_program(Brainfuck *bf, Program p)
 {
@@ -619,14 +661,7 @@ void run_program(Brainfuck *bf, Program p)
 
         switch (op->kind) {
         case OP_PTR: {
-            bf->data_ptr += (ptrdiff_t)op->arg;
-
-            if (bf->data_ptr < 0) {
-                bf->data_ptr += bf->tape_size;
-            } else if (bf->data_ptr >= (ptrdiff_t)bf->tape_size) {
-                bf->data_ptr -= bf->tape_size;
-            }
-
+            move_ptr(bf, (ptrdiff_t)op->arg);
             ip++;
         } break;
         case OP_DATA: {
@@ -668,6 +703,15 @@ void run_program(Brainfuck *bf, Program p)
             bf->tape[bf->data_ptr] = 0;
             ip++;
         } break;
+        case OP_SCAN: {
+            while (bf->tape[bf->data_ptr] != 0) {
+                move_ptr(bf, (ptrdiff_t)op->arg);
+            }
+            ip++;
+        } break;
+        case OP_INVALID:
+            assert(0 && "ERROR: Program contains invalid opcode");
+            break;
         default: assert(0 && "UNREACHABLE: OpcodeKind");
         }
     }
@@ -756,10 +800,11 @@ int main(int argc, char **argv)
     fprintf(stderr, "\nOpcode counts:\n");
     size_t total = 0;
     for (size_t i = 0; i < OP_MAX; i++) {
-        printf("    %s: %zu\n", opcode_names[i], opcode_counts[i]);
+        if (i == OP_INVALID) continue;
+        fprintf(stderr, "    %s: %zu\n", opcode_names[i], opcode_counts[i]);
         total += opcode_counts[i];
     }
-    printf("Total: %zu\n", total);
+    fprintf(stderr, "Total: %zu\n", total);
 #endif
 
     mason_arena_destroy(arena);
