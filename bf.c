@@ -632,13 +632,31 @@ void compile_instructions_into(Program *p, Instructions *insts)
 
         switch (inst->kind) {
         case INST_MOVE_PTR: {
-            Opcode op = opcode(OP_PTR, inst->as.ptr_diff);
-            da_append(p, &op);
+            // Collapse subsequent PTR instructions
+            ptrdiff_t diff = inst->as.ptr_diff;
+            while (i + 1 < insts->count &&
+                   insts->items[i + 1].kind == INST_MOVE_PTR) {
+                diff += insts->items[++i].as.ptr_diff;
+            }
+
+            if (diff != 0) {
+                Opcode op = opcode(OP_PTR, diff);
+                da_append(p, &op);
+            }
         }
             continue;
         case INST_CHANGE_DATA: {
-            Opcode op = opcode(OP_DATA, inst->as.data_diff);
-            da_append(p, &op);
+            // Collapse subsequent DATA instructions
+            int64_t diff = inst->as.data_diff;
+            while (i + 1 < insts->count &&
+                   insts->items[i + 1].kind == INST_CHANGE_DATA) {
+                diff += insts->items[++i].as.data_diff;
+            }
+
+            if (diff != 0) {
+                Opcode op = opcode(OP_DATA, diff);
+                da_append(p, &op);
+            }
         }
             continue;
         case INST_OUTPUT: {
