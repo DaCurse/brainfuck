@@ -2,6 +2,8 @@
 
 Brainfuck interpreter in C
 
+This branch contains an earlier version which recursively interprets over the AST instead of over linear bytecode.
+
 ## Build
 
 ```bash

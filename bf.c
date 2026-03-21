@@ -481,8 +481,11 @@ void run_program(Brainfuck *bf, Program program)
         switch (inst->kind) {
         case BF_CHANGE_PTR:
             bf->data_ptr += inst->as.ptr_diff;
-            ptrdiff_t tape_size = (ptrdiff_t)bf->tape_size;
-            bf->data_ptr = (bf->data_ptr % tape_size + tape_size) % tape_size;
+            if (bf->data_ptr < 0) {
+                bf->data_ptr += bf->tape_size;
+            } else if (bf->data_ptr >= (ptrdiff_t)bf->tape_size) {
+                bf->data_ptr -= bf->tape_size;
+            }
             break;
         case BF_CHANGE_DATA:
             bf->tape[bf->data_ptr] += inst->as.data_diff;
