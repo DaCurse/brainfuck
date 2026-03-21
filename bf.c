@@ -699,6 +699,7 @@ static const char *opcode_names[OP_MAX] = {
     "OP_MOVEADD",
     "OP_SCAN",
 };
+static ptrdiff_t data_ptr_min = 0;
 static ptrdiff_t data_ptr_max = 0;
 #endif
 
@@ -706,15 +707,16 @@ static inline void bf_move_ptr(Brainfuck *bf, ptrdiff_t diff)
 {
     bf->data_ptr += diff;
 
+#ifdef PROFILE
+    if (bf->data_ptr < data_ptr_min) data_ptr_min = bf->data_ptr;
+    if (bf->data_ptr > data_ptr_max) data_ptr_max = bf->data_ptr;
+#endif
+
     if (bf->data_ptr < 0) {
         bf->data_ptr += bf->tape_size;
     } else if (bf->data_ptr >= (ptrdiff_t)bf->tape_size) {
         bf->data_ptr -= bf->tape_size;
     }
-
-#ifdef PROFILE
-    if (bf->data_ptr > data_ptr_max) data_ptr_max = bf->data_ptr;
-#endif
 }
 
 void run_program(Brainfuck *bf, Program p)
@@ -886,7 +888,9 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "Total: %zu\n", total);
 
-    fprintf(stderr, "\nMax Tape Position: %td\n", data_ptr_max);
+    fprintf(stderr, "\nData Pointer Stats:\n");
+    fprintf(stderr, "    Min Position = %td\n", data_ptr_min);
+    fprintf(stderr, "    Max Position = %td\n", data_ptr_max % bf.tape_size);
 #endif
 
     mason_arena_destroy(arena);
