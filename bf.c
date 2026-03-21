@@ -89,7 +89,7 @@ typedef struct Instruction Instruction;
 
 typedef struct {
     bool valid;
-    Instruction **items;
+    Instruction *items;
     size_t count;
     size_t capacity;
 } Instructions;
@@ -98,7 +98,7 @@ struct Instruction {
     InstructionKind kind;
     union {
         ptrdiff_t ptr_diff;
-        int32_t data_diff;
+        int64_t data_diff;
         size_t output_count;
         Instructions loop;
     } as;
@@ -171,59 +171,59 @@ typedef struct {
     ptrdiff_t data_ptr;
 } Brainfuck;
 
-Instruction *move_ptr(ptrdiff_t diff)
+Instruction move_ptr(ptrdiff_t diff)
 {
-    Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = INST_MOVE_PTR;
-    inst->as.ptr_diff = diff;
-    return inst;
+    return (Instruction){
+        .kind = INST_MOVE_PTR,
+        .as.ptr_diff = diff,
+    };
 }
 
-Instruction *change_data(int32_t diff)
+Instruction change_data(int64_t diff)
 {
-    Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = INST_CHANGE_DATA;
-    inst->as.data_diff = diff;
-    return inst;
+    return (Instruction){
+        .kind = INST_CHANGE_DATA,
+        .as.data_diff = diff,
+    };
 }
 
-Instruction *output(size_t count)
+Instruction output(size_t count)
 {
-    Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = INST_OUTPUT;
-    inst->as.output_count = count;
-    return inst;
+    return (Instruction){
+        .kind = INST_OUTPUT,
+        .as.output_count = count,
+    };
 }
 
-Instruction *input()
+Instruction input()
 {
-    Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = INST_INPUT;
-    return inst;
+    return (Instruction){
+        .kind = INST_INPUT,
+    };
 }
 
-Instruction *loop(Instructions body)
+Instruction loop(Instructions body)
 {
-    Instruction *inst = mason_arena_alloc(arena, sizeof(*inst));
-    inst->kind = INST_LOOP;
-    inst->as.loop = body;
-    return inst;
+    return (Instruction){
+        .kind = INST_LOOP,
+        .as.loop = body,
+    };
 }
 
 void display_token(TokenKind kind)
 {
     switch (kind) {
-    case TOKEN_END: printf("TOKEN_END\n"); break;
-    case TOKEN_RARROW: printf("TOKEN_RARROW\n"); break;
-    case TOKEN_LARROW: printf("TOKEN_LARROW\n"); break;
-    case TOKEN_PLUS: printf("TOKEN_PLUS\n"); break;
-    case TOKEN_MINUS: printf("TOKEN_MINUS\n"); break;
-    case TOKEN_DOT: printf("TOKEN_DOT\n"); break;
-    case TOKEN_COMMA: printf("TOKEN_COMMA\n"); break;
-    case TOKEN_OBRACKET: printf("TOKEN_OBRACKET\n"); break;
-    case TOKEN_CBRACKET: printf("TOKEN_CBRACKET\n"); break;
-    default: assert(0 && "UNREACHABLE: TokenKind");
+    case TOKEN_END: printf("TOKEN_END\n"); return;
+    case TOKEN_RARROW: printf("TOKEN_RARROW\n"); return;
+    case TOKEN_LARROW: printf("TOKEN_LARROW\n"); return;
+    case TOKEN_PLUS: printf("TOKEN_PLUS\n"); return;
+    case TOKEN_MINUS: printf("TOKEN_MINUS\n"); return;
+    case TOKEN_DOT: printf("TOKEN_DOT\n"); return;
+    case TOKEN_COMMA: printf("TOKEN_COMMA\n"); return;
+    case TOKEN_OBRACKET: printf("TOKEN_OBRACKET\n"); return;
+    case TOKEN_CBRACKET: printf("TOKEN_CBRACKET\n"); return;
     }
+    assert(0 && "UNREACHABLE: TokenKind");
 }
 
 void display_instruction_source(Instruction *inst)
@@ -236,7 +236,8 @@ void display_instruction_source(Instruction *inst)
         for (ptrdiff_t i = 0; i < abs_diff; i++) {
             putchar(inst_repr);
         }
-    } break;
+    }
+        return;
     case INST_CHANGE_DATA: {
         char inst_repr = inst->as.data_diff > 0 ? '+' : '-';
         int32_t abs_diff =
@@ -244,28 +245,34 @@ void display_instruction_source(Instruction *inst)
         for (int32_t i = 0; i < abs_diff; i++) {
             putchar(inst_repr);
         }
-    } break;
-    case INST_OUTPUT:
+    }
+        return;
+    case INST_OUTPUT: {
         for (size_t i = 0; i < inst->as.output_count; i++) {
             putchar('.');
         }
-        break;
-    case INST_INPUT: putchar(','); break;
-    case INST_LOOP:
+    }
+        return;
+    case INST_INPUT: {
+        putchar(',');
+    }
+        return;
+    case INST_LOOP: {
         putchar('[');
         for (size_t i = 0; i < inst->as.loop.count; i++) {
-            display_instruction_source(inst->as.loop.items[i]);
+            display_instruction_source(&inst->as.loop.items[i]);
         }
         putchar(']');
-        break;
-    default: assert(0 && "UNREACHABLE: InstructionKind");
     }
+        return;
+    }
+    assert(0 && "UNREACHABLE: InstructionKind");
 }
 
 void display_instructions_source(Instructions insts)
 {
     for (size_t i = 0; i < insts.count; i++) {
-        display_instruction_source(insts.items[i]);
+        display_instruction_source(&insts.items[i]);
     }
 }
 
@@ -276,49 +283,62 @@ void display_instruction_tree(Instruction *inst, size_t depth)
     }
 
     switch (inst->kind) {
-    case INST_MOVE_PTR:
+    case INST_MOVE_PTR: {
         printf("INST_MOVE_PTR: %+td\n", inst->as.ptr_diff);
-        break;
-    case INST_CHANGE_DATA:
-        printf("INST_CHANGE_DATA: %+d\n", inst->as.data_diff);
-        break;
-    case INST_OUTPUT:
+    }
+        return;
+    case INST_CHANGE_DATA: {
+        printf("INST_CHANGE_DATA: %+" PRId64 "\n", inst->as.data_diff);
+    }
+        return;
+    case INST_OUTPUT: {
         printf("INST_OUTPUT: %zu\n", inst->as.output_count);
-        break;
-    case INST_INPUT: printf("INST_INPUT\n"); break;
-    case INST_LOOP:
+    }
+        return;
+    case INST_INPUT: {
+        printf("INST_INPUT\n");
+    }
+        return;
+    case INST_LOOP: {
         printf("INST_LOOP:\n");
         for (size_t i = 0; i < inst->as.loop.count; i++) {
-            display_instruction_tree(inst->as.loop.items[i], depth + 1);
+            display_instruction_tree(&inst->as.loop.items[i], depth + 1);
         }
-        break;
-    default: assert(0 && "UNREACHABLE: InstructionKind");
     }
+        return;
+    }
+    assert(0 && "UNREACHABLE: InstructionKind");
 }
 
 void display_instructions_tree(Instructions insts)
 {
     for (size_t i = 0; i < insts.count; i++) {
-        display_instruction_tree(insts.items[i], 1);
+        display_instruction_tree(&insts.items[i], 1);
     }
 }
 
 void display_opcode(Opcode op)
 {
     switch (op.kind) {
-    case OP_DATA: printf("DATA %+" PRId64 "\n", op.arg.i64); break;
-    case OP_PTR: printf("PTR %+" PRId64 "\n", op.arg.i64); break;
-    case OP_OUT: printf("OUT %" PRId64 "\n", op.arg.i64); break;
-    case OP_IN: printf("IN\n"); break;
-    case OP_JZ: printf("JZ %" PRId64 "\n", op.arg.i64); break;
-    case OP_JNZ: printf("JNZ %" PRId64 "\n", op.arg.i64); break;
-    case OP_CLR: printf("CLR\n"); break;
+    case OP_DATA: printf("DATA %+" PRId64 "\n", op.arg.i64); return;
+    case OP_PTR: printf("PTR %+" PRId64 "\n", op.arg.i64); return;
+    case OP_OUT: printf("OUT %" PRId64 "\n", op.arg.i64); return;
+    case OP_IN: printf("IN\n"); return;
+    case OP_JZ: printf("JZ %" PRId64 "\n", op.arg.i64); return;
+    case OP_JNZ: printf("JNZ %" PRId64 "\n", op.arg.i64); return;
+    case OP_CLR: printf("CLR\n"); return;
     case OP_MOVEADD: {
         printf("MOVEADD %+d, %+d\n", op.arg.i32[0], op.arg.i32[1]);
-    } break;
-    case OP_SCAN: printf("SCAN %+" PRId64 "\n", op.arg.i64); break;
-    default: assert(0 && "UNREACHABLE: OpcodeKind");
     }
+        return;
+    case OP_SCAN: printf("SCAN %+" PRId64 "\n", op.arg.i64); return;
+
+    case OP_INVALID:
+    case OP_MAX: {
+        assert(0 && "ERROR: Invalid opcode");
+    }
+    }
+    assert(0 && "UNREACHABLE: OpcodeKind");
 }
 
 void display_program(Program p)
@@ -416,26 +436,41 @@ Instructions parse_instructions(Lexer *l, TokenKind stop_token)
             return insts;
         }
 
-        Instruction *inst;
         switch (l->token) {
         case TOKEN_RARROW: {
-            inst = move_ptr(lexer_forward_count(l, TOKEN_RARROW) + 1);
-        } break;
+            Instruction inst =
+                move_ptr(lexer_forward_count(l, TOKEN_RARROW) + 1);
+            da_append(&insts, &inst);
+        }
+            continue;
         case TOKEN_LARROW: {
-            inst = move_ptr(-(lexer_forward_count(l, TOKEN_LARROW) + 1));
-        } break;
+            Instruction inst =
+                move_ptr(-(lexer_forward_count(l, TOKEN_LARROW) + 1));
+            da_append(&insts, &inst);
+        }
+            continue;
         case TOKEN_PLUS: {
-            inst = change_data(lexer_forward_count(l, TOKEN_PLUS) + 1);
-        } break;
+            Instruction inst =
+                change_data(lexer_forward_count(l, TOKEN_PLUS) + 1);
+            da_append(&insts, &inst);
+        }
+            continue;
         case TOKEN_MINUS: {
-            inst = change_data(-(lexer_forward_count(l, TOKEN_MINUS) + 1));
-        } break;
-        case TOKEN_DOT:
-            inst = output(lexer_forward_count(l, TOKEN_DOT) + 1);
-            break;
+            Instruction inst =
+                change_data(-(lexer_forward_count(l, TOKEN_MINUS) + 1));
+            da_append(&insts, &inst);
+        }
+            continue;
+        case TOKEN_DOT: {
+            Instruction inst = output(lexer_forward_count(l, TOKEN_DOT) + 1);
+            da_append(&insts, &inst);
+        }
+            continue;
         case TOKEN_COMMA: {
-            inst = input();
-        } break;
+            Instruction inst = input();
+            da_append(&insts, &inst);
+        }
+            continue;
         case TOKEN_OBRACKET: {
             Cursor bracket_cur = l->cur;
             Instructions body = parse_instructions(l, TOKEN_CBRACKET);
@@ -448,8 +483,10 @@ Instructions parse_instructions(Lexer *l, TokenKind stop_token)
                 display_token(l->token);
                 return invalid_instructions();
             }
-            inst = loop(body);
-        } break;
+            Instruction inst = loop(body);
+            da_append(&insts, &inst);
+        }
+            continue;
         case TOKEN_CBRACKET: {
             fprintf(stderr,
                     "ERROR: Unmatched ']' at line %zu, column %zu\n",
@@ -457,16 +494,9 @@ Instructions parse_instructions(Lexer *l, TokenKind stop_token)
                     l->cur.pos - l->cur.bol);
             return invalid_instructions();
         }
-        default:
-            fprintf(stderr,
-                    "ERROR: Unexpected token at line %zu, column %zu: ",
-                    l->cur.row + 1,
-                    l->cur.pos - l->cur.bol);
-            display_token(l->token);
-            return invalid_instructions();
+        case TOKEN_END: assert(0 && "UNREACHABLE: Parser loop didn't break");
         }
-
-        da_append(&insts, &inst);
+        assert(0 && "UNREACHABLE: TokenKind");
     }
 }
 
@@ -487,9 +517,9 @@ void compile_instructions_into(Program *p, Instructions *insts);
 Opcode detect_clear(Instructions *body)
 {
     // Pattern: [-] or [+]
-    if (body->count == 1 && body->items[0]->kind == INST_CHANGE_DATA &&
-        (body->items[0]->as.data_diff == -1 ||
-         body->items[0]->as.data_diff == 1)) {
+    if (body->count == 1 && body->items[0].kind == INST_CHANGE_DATA &&
+        (body->items[0].as.data_diff == -1 ||
+         body->items[0].as.data_diff == 1)) {
         return opcode(OP_CLR, 0);
     }
 
@@ -516,7 +546,7 @@ Opcode detect_moveadd(Instructions *body)
     bool saw_increment = false;
 
     for (size_t i = 0; i < body->count; i++) {
-        Instruction *inst = body->items[i];
+        Instruction *inst = &body->items[i];
 
         switch (inst->kind) {
         case INST_MOVE_PTR: {
@@ -551,8 +581,8 @@ Opcode detect_moveadd(Instructions *body)
 Opcode detect_scan(Instructions *body)
 {
     // Detects patterns like [>] or [<] with any amount of < or > inside
-    if (body->count == 1 && body->items[0]->kind == INST_MOVE_PTR) {
-        return opcode(OP_SCAN, body->items[0]->as.ptr_diff);
+    if (body->count == 1 && body->items[0].kind == INST_MOVE_PTR) {
+        return opcode(OP_SCAN, body->items[0].as.ptr_diff);
     }
 
     return invalid_opcode();
@@ -598,30 +628,35 @@ void compile_loop(Program *p, Instructions *body)
 void compile_instructions_into(Program *p, Instructions *insts)
 {
     for (size_t i = 0; i < insts->count; i++) {
-        Instruction *inst = insts->items[i];
+        Instruction *inst = &insts->items[i];
 
         switch (inst->kind) {
         case INST_MOVE_PTR: {
             Opcode op = opcode(OP_PTR, inst->as.ptr_diff);
             da_append(p, &op);
-        } break;
+        }
+            continue;
         case INST_CHANGE_DATA: {
             Opcode op = opcode(OP_DATA, inst->as.data_diff);
             da_append(p, &op);
-        } break;
+        }
+            continue;
         case INST_OUTPUT: {
             Opcode op = opcode(OP_OUT, inst->as.output_count);
             da_append(p, &op);
-        } break;
+        }
+            continue;
         case INST_INPUT: {
             Opcode op = opcode(OP_IN, 0);
             da_append(p, &op);
-        } break;
+        }
+            continue;
         case INST_LOOP: {
             compile_loop(p, &inst->as.loop);
-        } break;
-        default: assert(0 && "UNREACHABLE: InstructionKind");
         }
+            continue;
+        }
+        assert(0 && "UNREACHABLE: InstructionKind");
     }
 }
 
@@ -673,58 +708,69 @@ void run_program(Brainfuck *bf, Program p)
         case OP_PTR: {
             bf_move_ptr(bf, (ptrdiff_t)op->arg.i64);
             ip++;
-        } break;
+        }
+            continue;
         case OP_DATA: {
             bf->tape[bf->data_ptr] += op->arg.i64;
             ip++;
-        } break;
+        }
+            continue;
         case OP_OUT: {
             for (size_t i = 0; i < (size_t)op->arg.i64; i++) {
                 putchar(bf->tape[bf->data_ptr]);
             }
             ip++;
-        } break;
+        }
+            continue;
         case OP_IN: {
             int c = getchar();
             bf->tape[bf->data_ptr] = (c == EOF) ? 0 : (Cell)c;
             ip++;
-        } break;
+        }
+            continue;
         case OP_JZ: {
             if (bf->tape[bf->data_ptr] == 0) {
                 ip = (size_t)op->arg.i64;
             } else {
                 ip++;
             }
-        } break;
+        }
+            continue;
         case OP_JNZ: {
             if (bf->tape[bf->data_ptr] != 0) {
                 ip = (size_t)op->arg.i64;
             } else {
                 ip++;
             }
-        } break;
+        }
+            continue;
         case OP_CLR: {
             bf->tape[bf->data_ptr] = 0;
             ip++;
-        } break;
+        }
+            continue;
         case OP_MOVEADD: {
             int32_t offset = op->arg.i32[0];
             int32_t mul = op->arg.i32[1];
             bf->tape[bf->data_ptr + offset] += bf->tape[bf->data_ptr] * mul;
             bf->tape[bf->data_ptr] = 0;
             ip++;
-        } break;
+        }
+            continue;
         case OP_SCAN: {
             while (bf->tape[bf->data_ptr] != 0) {
                 bf_move_ptr(bf, (ptrdiff_t)op->arg.i64);
             }
             ip++;
-        } break;
+        }
+            continue;
+
         case OP_INVALID:
+        case OP_MAX:
             assert(0 && "ERROR: Program contains invalid opcode");
             break;
-        default: assert(0 && "UNREACHABLE: OpcodeKind");
         }
+        assert(0 && "UNREACHABLE: OpcodeKind");
     }
 }
 
