@@ -27,7 +27,7 @@
             while (new_capacity < _da->count + _n) {                           \
                 new_capacity *= 2;                                             \
             }                                                                  \
-            _da->items = mason_arena_realloc(arena,                            \
+            _da->items = mason_arena_realloc(g_arena,                          \
                                              _da->items,                       \
                                              _da->capacity * item_size,        \
                                              new_capacity * item_size);        \
@@ -40,16 +40,7 @@
 
 #define da_append(da, src) da_append_many(da, src, 1)
 
-#ifdef PROFILE
-#define PROFILE_START(name)                                                    \
-    struct timespec _timer_##name;                                             \
-    clock_gettime(CLOCK_MONOTONIC, &_timer_##name)
-#define PROFILE_END(name)                                                      \
-    fprintf(stderr,                                                            \
-            "\nPROFILE: " #name " took %.3fms\n",                              \
-            timer_elapsed(&_timer_##name))
-
-static inline double timer_elapsed(struct timespec *t)
+static inline double timer_elapsed(const struct timespec *t)
 {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -58,12 +49,41 @@ static inline double timer_elapsed(struct timespec *t)
     ms += (double)(now.tv_nsec - t->tv_nsec) / 1e6;
     return ms;
 }
-#else
-#define PROFILE_START(_name) (void)0
-#define PROFILE_END(_name) (void)(0)
-#endif
 
-static MASON_Arena *arena;
+#define PROFILE_START(name)                                                    \
+    struct timespec _timer_##name;                                             \
+    if (g_profile_enabled) {                                                   \
+        clock_gettime(CLOCK_MONOTONIC, &_timer_##name);                        \
+    }
+
+#define PROFILE_END(name)                                                      \
+    if (g_profile_enabled) {                                                   \
+        fprintf(g_profile_out,                                                 \
+                "PROFILE: " #name " took %.3fms\n",                            \
+                timer_elapsed(&_timer_##name));                                \
+    }
+
+static bool g_profile_enabled = false;
+static FILE *g_profile_out = NULL;
+static MASON_Arena *g_arena = NULL;
+
+// Profiling stats
+static size_t opcode_counts[OP_MAX] = {0};
+static const char *opcode_names[OP_MAX] = {
+    "OP_INVALID",
+    "OP_PTR",
+    "OP_DATA",
+    "OP_OUT",
+    "OP_IN",
+    "OP_JZ",
+    "OP_JNZ",
+    "OP_CLR",
+    "OP_MOVEADD",
+    "OP_SCAN",
+};
+static ptrdiff_t data_ptr_min = 0;
+static ptrdiff_t data_ptr_max = 0;
+
 
 typedef enum {
     TOKEN_END,
@@ -152,6 +172,8 @@ typedef struct {
 } Opcode;
 
 typedef struct {
+    const char *source_file;
+
     Opcode *items;
     size_t count;
     size_t capacity;
@@ -226,83 +248,82 @@ void display_token(TokenKind kind)
     assert(0 && "UNREACHABLE: TokenKind");
 }
 
-void display_instruction_source(Instruction *inst)
+void buffer_appendf(Buffer *buf, const char *fmt, ...)
 {
-    switch (inst->kind) {
-    case INST_MOVE_PTR: {
-        char inst_repr = inst->as.ptr_diff > 0 ? '>' : '<';
-        ptrdiff_t abs_diff =
-            inst->as.ptr_diff < 0 ? -inst->as.ptr_diff : inst->as.ptr_diff;
-        for (ptrdiff_t i = 0; i < abs_diff; i++) {
-            putchar(inst_repr);
-        }
+    va_list args;
+    va_start(args, fmt);
+
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int needed = vsnprintf(NULL, 0, fmt, args_copy);
+    va_end(args_copy);
+    assert(needed >= 0 && "ERROR: Failed to format output string");
+
+    if (needed > 0) {
+        size_t n = (size_t)needed;
+        char *tmp = mason_arena_alloc(g_arena, n + 1);
+        assert(tmp != NULL);
+        int written = vsnprintf(tmp, n + 1, fmt, args);
+        assert(written == needed && "ERROR: Unexpected formatted size");
+        da_append_many(buf, tmp, n);
     }
-        return;
-    case INST_CHANGE_DATA: {
-        char inst_repr = inst->as.data_diff > 0 ? '+' : '-';
-        int32_t abs_diff =
-            inst->as.data_diff < 0 ? -inst->as.data_diff : inst->as.data_diff;
-        for (int32_t i = 0; i < abs_diff; i++) {
-            putchar(inst_repr);
-        }
-    }
-        return;
-    case INST_OUTPUT: {
-        for (size_t i = 0; i < inst->as.output_count; i++) {
-            putchar('.');
-        }
-    }
-        return;
-    case INST_INPUT: {
-        putchar(',');
-    }
-        return;
-    case INST_LOOP: {
-        putchar('[');
-        for (size_t i = 0; i < inst->as.loop.count; i++) {
-            display_instruction_source(&inst->as.loop.items[i]);
-        }
-        putchar(']');
-    }
-        return;
-    }
-    assert(0 && "UNREACHABLE: InstructionKind");
+
+    va_end(args);
 }
 
-void display_instructions_source(Instructions insts)
+bool buffer_write_to_file(Buffer buf, const char *path)
 {
-    for (size_t i = 0; i < insts.count; i++) {
-        display_instruction_source(&insts.items[i]);
+    FILE *out = fopen(path, "w");
+    if (!out) {
+        fprintf(stderr,
+                "ERROR: Failed to open %s: %s\n",
+                path,
+                strerror(errno));
+        return false;
     }
+
+    if (buf.count > 0) {
+        size_t written = fwrite(buf.items, 1, buf.count, out);
+        if (written != buf.count) {
+            fclose(out);
+            fprintf(stderr, "ERROR: Failed to write all bytes to %s\n", path);
+            return false;
+        }
+    }
+
+    fclose(out);
+    return true;
 }
 
-void display_instruction_tree(Instruction *inst, size_t depth)
+void display_instruction_tree(Buffer *out, Instruction *inst, size_t depth)
 {
     for (size_t i = 0; i < depth; i++) {
-        printf("    ");
+        buffer_appendf(out, "    ");
     }
 
     switch (inst->kind) {
     case INST_MOVE_PTR: {
-        printf("INST_MOVE_PTR: %+td\n", inst->as.ptr_diff);
+        buffer_appendf(out, "INST_MOVE_PTR: %+td\n", inst->as.ptr_diff);
     }
         return;
     case INST_CHANGE_DATA: {
-        printf("INST_CHANGE_DATA: %+" PRId64 "\n", inst->as.data_diff);
+        buffer_appendf(out,
+                       "INST_CHANGE_DATA: %+" PRId64 "\n",
+                       inst->as.data_diff);
     }
         return;
     case INST_OUTPUT: {
-        printf("INST_OUTPUT: %zu\n", inst->as.output_count);
+        buffer_appendf(out, "INST_OUTPUT: %zu\n", inst->as.output_count);
     }
         return;
     case INST_INPUT: {
-        printf("INST_INPUT\n");
+        buffer_appendf(out, "INST_INPUT\n");
     }
         return;
     case INST_LOOP: {
-        printf("INST_LOOP:\n");
+        buffer_appendf(out, "INST_LOOP:\n");
         for (size_t i = 0; i < inst->as.loop.count; i++) {
-            display_instruction_tree(&inst->as.loop.items[i], depth + 1);
+            display_instruction_tree(out, &inst->as.loop.items[i], depth + 1);
         }
     }
         return;
@@ -310,28 +331,31 @@ void display_instruction_tree(Instruction *inst, size_t depth)
     assert(0 && "UNREACHABLE: InstructionKind");
 }
 
-void display_instructions_tree(Instructions insts)
+void display_instructions_tree(Buffer *out, Instructions insts)
 {
     for (size_t i = 0; i < insts.count; i++) {
-        display_instruction_tree(&insts.items[i], 1);
+        display_instruction_tree(out, &insts.items[i], 1);
     }
 }
 
-void display_opcode(Opcode op)
+void display_opcode(Buffer *out, Opcode op)
 {
     switch (op.kind) {
-    case OP_DATA: printf("DATA %+" PRId64 "\n", op.arg.i64); return;
-    case OP_PTR: printf("PTR %+" PRId64 "\n", op.arg.i64); return;
-    case OP_OUT: printf("OUT %" PRId64 "\n", op.arg.i64); return;
-    case OP_IN: printf("IN\n"); return;
-    case OP_JZ: printf("JZ %" PRId64 "\n", op.arg.i64); return;
-    case OP_JNZ: printf("JNZ %" PRId64 "\n", op.arg.i64); return;
-    case OP_CLR: printf("CLR\n"); return;
-    case OP_MOVEADD: {
-        printf("MOVEADD %+d, %+d\n", op.arg.i32[0], op.arg.i32[1]);
-    }
+    case OP_DATA:
+        buffer_appendf(out, "DATA %+" PRId64 "\n", op.arg.i64);
         return;
-    case OP_SCAN: printf("SCAN %+" PRId64 "\n", op.arg.i64); return;
+    case OP_PTR: buffer_appendf(out, "PTR %+" PRId64 "\n", op.arg.i64); return;
+    case OP_OUT: buffer_appendf(out, "OUT %" PRId64 "\n", op.arg.i64); return;
+    case OP_IN: buffer_appendf(out, "IN\n"); return;
+    case OP_JZ: buffer_appendf(out, "JZ %" PRId64 "\n", op.arg.i64); return;
+    case OP_JNZ: buffer_appendf(out, "JNZ %" PRId64 "\n", op.arg.i64); return;
+    case OP_CLR: buffer_appendf(out, "CLR\n"); return;
+    case OP_MOVEADD:
+        buffer_appendf(out, "MOVEADD %+d, %+d\n", op.arg.i32[0], op.arg.i32[1]);
+        return;
+    case OP_SCAN:
+        buffer_appendf(out, "SCAN %+" PRId64 "\n", op.arg.i64);
+        return;
 
     case OP_INVALID:
     case OP_MAX: {
@@ -341,12 +365,28 @@ void display_opcode(Opcode op)
     assert(0 && "UNREACHABLE: OpcodeKind");
 }
 
-void display_program(Program p)
+void display_program(Buffer *out, Program p)
 {
     for (size_t i = 0; i < p.count; i++) {
-        printf("    %08zu ", i);
-        display_opcode(p.items[i]);
+        buffer_appendf(out, "%08zu ", i);
+        display_opcode(out, p.items[i]);
     }
+}
+
+Buffer instruction_tree_output(Instructions insts)
+{
+    Buffer out = {0};
+    buffer_appendf(&out, "Instructions tree:\n");
+    display_instructions_tree(&out, insts);
+    return out;
+}
+
+Buffer bytecode_output(Program p)
+{
+    Buffer out = {0};
+    buffer_appendf(&out, "; %s\n", p.source_file);
+    display_program(&out, p);
+    return out;
 }
 
 char lexer_current_char(Lexer *l)
@@ -678,39 +718,15 @@ void compile_instructions_into(Program *p, Instructions *insts)
     }
 }
 
-Program compile_program(Instructions insts)
-{
-    Program p = {0};
-    compile_instructions_into(&p, &insts);
-    return p;
-}
-
-#ifdef PROFILE
-static size_t opcode_counts[OP_MAX] = {0};
-static const char *opcode_names[OP_MAX] = {
-    "OP_INVALID",
-    "OP_PTR",
-    "OP_DATA",
-    "OP_OUT",
-    "OP_IN",
-    "OP_JZ",
-    "OP_JNZ",
-    "OP_CLR",
-    "OP_MOVEADD",
-    "OP_SCAN",
-};
-static ptrdiff_t data_ptr_min = 0;
-static ptrdiff_t data_ptr_max = 0;
-#endif
 
 static inline void bf_move_ptr(Brainfuck *bf, ptrdiff_t diff)
 {
     bf->data_ptr += diff;
 
-#ifdef PROFILE
-    if (bf->data_ptr < data_ptr_min) data_ptr_min = bf->data_ptr;
-    if (bf->data_ptr > data_ptr_max) data_ptr_max = bf->data_ptr;
-#endif
+    if (g_profile_enabled) {
+        if (bf->data_ptr < data_ptr_min) data_ptr_min = bf->data_ptr;
+        if (bf->data_ptr > data_ptr_max) data_ptr_max = bf->data_ptr;
+    }
 
     if (bf->data_ptr < 0) {
         bf->data_ptr += bf->tape_size;
@@ -725,9 +741,9 @@ void run_program(Brainfuck *bf, Program p)
     while (ip < p.count) {
         Opcode *op = &p.items[ip];
 
-#ifdef PROFILE
-        opcode_counts[op->kind]++;
-#endif
+        if (g_profile_enabled) {
+            opcode_counts[op->kind]++;
+        }
 
         switch (op->kind) {
         case OP_PTR: {
@@ -799,26 +815,83 @@ void run_program(Brainfuck *bf, Program p)
     }
 }
 
+typedef struct {
+    const char *source_file;
+    const char *profile_out_path;
+    const char *instruction_tree_out_path;
+    const char *bytecode_out_path;
+} Flags;
+
+void print_usage(const char *program)
+{
+    fprintf(stderr,
+            "USAGE: %s <filename> [--instruction-out <path>] "
+            "[--bytecode-out <path>] [--profile-out <path>]\n",
+            program);
+}
+
 int main(int argc, char **argv)
 {
-    char *program = argv[0];
-    if (--argc < 1) {
-        fprintf(stderr, "USAGE: %s <filename>\n", program);
+    Flags flags = {0};
+    char *program = argc > 0 ? argv[0] : "bf";
+    if (argc < 2) {
+        print_usage(program);
         return 1;
     }
 
-    char *source_file = argv[1];
+    for (int i = 1; i < argc; i++) {
+        if (i + 1 < argc && strcmp(argv[i], "--profile-out") == 0) {
+            flags.profile_out_path = argv[++i];
+        } else if (i + 1 < argc && strcmp(argv[i], "--bytecode-out") == 0) {
+            flags.bytecode_out_path = argv[++i];
+        } else if (i + 1 < argc && strcmp(argv[i], "--instruction-out") == 0) {
+            flags.instruction_tree_out_path = argv[++i];
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "ERROR: Unknown option: %s\n", argv[i]);
+            print_usage(program);
+            return 1;
+        } else if (flags.source_file == NULL) {
+            flags.source_file = argv[i];
+        } else {
+            fprintf(stderr, "ERROR: Multiple input files provided\n");
+            print_usage(program);
+            return 1;
+        }
+    }
+
+    if (flags.source_file == NULL) {
+        fprintf(stderr, "ERROR: Missing input file\n");
+        print_usage(program);
+        return 1;
+    }
+
+    FILE *profile_out = NULL;
+    if (flags.profile_out_path != NULL) {
+        profile_out = fopen(flags.profile_out_path, "w");
+        if (!profile_out) {
+            fprintf(stderr,
+                    "ERROR: Failed to open %s: %s\n",
+                    flags.profile_out_path,
+                    strerror(errno));
+            return 1;
+        }
+        g_profile_enabled = true;
+        g_profile_out = profile_out;
+    }
+
+    char *source_file = (char *)flags.source_file;
     FILE *f = fopen(source_file, "r");
     if (!f) {
         fprintf(stderr,
                 "ERROR: Failed to open %s: %s\n",
                 source_file,
                 strerror(errno));
+        if (profile_out) fclose(profile_out);
         return 1;
     }
 
-    arena = mason_arena_create(1024 * 1024);
-    assert(arena != NULL);
+    g_arena = mason_arena_create(1024 * 1024);
+    assert(g_arena != NULL);
 
     Buffer buf = {0};
     char chunk[4096];
@@ -830,7 +903,8 @@ int main(int argc, char **argv)
 
     if (buf.count == 0) {
         fprintf(stderr, "ERROR: Empty input file\n");
-        mason_arena_destroy(arena);
+        if (profile_out) fclose(profile_out);
+        mason_arena_destroy(g_arena);
         return 1;
     }
 
@@ -844,7 +918,8 @@ int main(int argc, char **argv)
 
     if (!insts.valid) {
         fprintf(stderr, "ERROR: Invalid program\n");
-        mason_arena_destroy(arena);
+        if (profile_out) fclose(profile_out);
+        mason_arena_destroy(g_arena);
         return 1;
     }
 
@@ -852,47 +927,60 @@ int main(int argc, char **argv)
         fprintf(stderr, "NOTE: Empty program\n");
     }
 
-#ifdef TRACE_PROGRAM
-    printf("Instructions tree:\n");
-    display_instructions_tree(insts);
-    printf("\nSource reconstructed from instructions:\n");
-    display_instructions_source(insts);
-    printf("\n");
-#endif
+    if (flags.instruction_tree_out_path != NULL) {
+        Buffer out = instruction_tree_output(insts);
+        if (!buffer_write_to_file(out, flags.instruction_tree_out_path)) {
+            if (profile_out) fclose(profile_out);
+            mason_arena_destroy(g_arena);
+            return 1;
+        }
+    }
 
+    Program p = {
+        .source_file = source_file,
+    };
     PROFILE_START(compile_program);
-    Program p = compile_program(insts);
+    compile_instructions_into(&p, &insts);
     PROFILE_END(compile_program);
 
-#ifdef TRACE_PROGRAM
-    printf("\nOpcodes:\n");
-    display_program(p);
-    printf("\n\nOutput:\n");
-#endif
+    if (flags.bytecode_out_path != NULL) {
+        Buffer out = bytecode_output(p);
+        if (!buffer_write_to_file(out, flags.bytecode_out_path)) {
+            if (profile_out) fclose(profile_out);
+            mason_arena_destroy(g_arena);
+            return 1;
+        }
+    }
 
     Brainfuck bf = {
-        .tape = mason_arena_calloc(arena, TAPE_SIZE, sizeof(*bf.tape)),
+        .tape = mason_arena_calloc(g_arena, TAPE_SIZE, sizeof(*bf.tape)),
         .tape_size = TAPE_SIZE,
     };
     PROFILE_START(run_program);
     run_program(&bf, p);
     PROFILE_END(run_program);
 
-#ifdef PROFILE
-    fprintf(stderr, "\nOpcode counts:\n");
-    size_t total = 0;
-    for (size_t i = 0; i < OP_MAX; i++) {
-        if (i == OP_INVALID) continue;
-        fprintf(stderr, "    %s: %zu\n", opcode_names[i], opcode_counts[i]);
-        total += opcode_counts[i];
+    if (g_profile_enabled) {
+        fprintf(g_profile_out, "\nOpcode counts:\n");
+        size_t total = 0;
+        for (size_t i = 0; i < OP_MAX; i++) {
+            if (i == OP_INVALID) continue;
+            fprintf(g_profile_out,
+                    "    %s: %zu\n",
+                    opcode_names[i],
+                    opcode_counts[i]);
+            total += opcode_counts[i];
+        }
+        fprintf(g_profile_out, "Total: %zu\n", total);
+
+        fprintf(g_profile_out, "\nData Pointer Stats:\n");
+        fprintf(g_profile_out, "    Min Position = %td\n", data_ptr_min);
+        fprintf(g_profile_out,
+                "    Max Position = %td\n",
+                data_ptr_max % bf.tape_size);
+        fclose(profile_out);
     }
-    fprintf(stderr, "Total: %zu\n", total);
 
-    fprintf(stderr, "\nData Pointer Stats:\n");
-    fprintf(stderr, "    Min Position = %td\n", data_ptr_min);
-    fprintf(stderr, "    Max Position = %td\n", data_ptr_max % bf.tape_size);
-#endif
-
-    mason_arena_destroy(arena);
+    mason_arena_destroy(g_arena);
     return 0;
 }
